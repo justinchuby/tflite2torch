@@ -413,11 +413,15 @@ class OperatorConverter:
         }
 
     def _convert_mean(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite MEAN to PyTorch mean."""
+        """Convert TFLite MEAN to PyTorch mean.
+        
+        MEAN takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
         return {
-            "module": torch.mean,
-            "params": {"keepdim": keep_dims},
+            "module": "mean",
+            "params": {"keep_dims": keep_dims},
+            "custom": True,
         }
 
     def _convert_pad(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
@@ -657,14 +661,20 @@ class OperatorConverter:
     
     # Additional Reduction Operations
     def _convert_reduce_max(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite REDUCE_MAX to PyTorch max."""
+        """Convert TFLite REDUCE_MAX to PyTorch max.
+        
+        REDUCE_MAX takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
-        return {"module": torch.max, "params": {"keepdim": keep_dims}}
+        return {"module": "reduce_max", "params": {"keep_dims": keep_dims}, "custom": True}
     
     def _convert_reduce_min(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite REDUCE_MIN to PyTorch min."""
+        """Convert TFLite REDUCE_MIN to PyTorch min.
+        
+        REDUCE_MIN takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
-        return {"module": torch.min, "params": {"keepdim": keep_dims}}
+        return {"module": "reduce_min", "params": {"keep_dims": keep_dims}, "custom": True}
     
     def _convert_reduce_prod(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite REDUCE_PROD to PyTorch prod."""
@@ -677,9 +687,12 @@ class OperatorConverter:
         return {"module": torch.any, "params": {"keepdim": keep_dims}}
     
     def _convert_sum(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite SUM to PyTorch sum."""
+        """Convert TFLite SUM to PyTorch sum.
+        
+        SUM takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
-        return {"module": torch.sum, "params": {"keepdim": keep_dims}}
+        return {"module": "sum", "params": {"keep_dims": keep_dims}, "custom": True}
     
     # Additional Shape & Tensor Manipulation
     def _convert_broadcast_args(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:

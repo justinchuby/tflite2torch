@@ -397,6 +397,90 @@ class FXReconstructor:
                 )
             output_node.name = node_name
             return output_node
+        elif op_name in ("mean", "sum", "reduce_max", "reduce_min"):
+            # Reduction operators take 2 inputs: input tensor and reduction_indices tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                axis_idx = operator.inputs[1]
+                keep_dims = operator.builtin_options.get("keep_dims", False)
+                
+                # Infer keep_dims from output shape if not in options
+                # If output has same rank as input, keep_dims is True
+                if not keep_dims and len(operator.outputs) > 0:
+                    input_idx = operator.inputs[0]
+                    output_idx = operator.outputs[0]
+                    if input_idx < len(subgraph.tensors) and output_idx < len(subgraph.tensors):
+                        input_shape = subgraph.tensors[input_idx].shape
+                        output_shape = subgraph.tensors[output_idx].shape
+                        if len(input_shape) == len(output_shape):
+                            keep_dims = True
+                
+                if axis_idx in weights:
+                    axis_tensor = weights[axis_idx]
+                    # Convert axis tensor to int or tuple of ints
+                    axis_list = axis_tensor.tolist()
+                    if isinstance(axis_list, list):
+                        axis = tuple(axis_list) if len(axis_list) > 1 else axis_list[0]
+                    else:
+                        axis = axis_list
+                    
+                    # Create appropriate PyTorch call
+                    if op_name == "mean":
+                        output_node = self.graph.call_function(
+                            torch.mean,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                    elif op_name == "sum":
+                        output_node = self.graph.call_function(
+                            torch.sum,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                    elif op_name == "reduce_max":
+                        # torch.max with dim returns (values, indices)
+                        # We need just the values
+                        max_node = self.graph.call_function(
+                            torch.max,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                        # Extract the values (first element of the named tuple)
+                        output_node = self.graph.call_function(
+                            lambda x: x.values if hasattr(x, 'values') else x,
+                            args=(max_node,)
+                        )
+                    elif op_name == "reduce_min":
+                        # torch.min with dim returns (values, indices)
+                        # We need just the values
+                        min_node = self.graph.call_function(
+                            torch.min,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                        # Extract the values (first element of the named tuple)
+                        output_node = self.graph.call_function(
+                            lambda x: x.values if hasattr(x, 'values') else x,
+                            args=(min_node,)
+                        )
+                else:
+                    # If axis is not available, reduce all dimensions
+                    if op_name == "mean":
+                        output_node = self.graph.call_function(torch.mean, args=(input_node,))
+                    elif op_name == "sum":
+                        output_node = self.graph.call_function(torch.sum, args=(input_node,))
+                    elif op_name == "reduce_max":
+                        output_node = self.graph.call_function(torch.max, args=(input_node,))
+                    else:  # reduce_min
+                        output_node = self.graph.call_function(torch.min, args=(input_node,))
+            else:
+                # Only one input provided
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
         elif op_name == "cast":
             # CAST operator
             # For now, just pass through the input
