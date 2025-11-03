@@ -90,14 +90,25 @@ conv_info = converter.convert(
 )
 ```
 
-Supported operators include:
-- Convolution: CONV_2D, DEPTHWISE_CONV_2D
-- Fully Connected: FULLY_CONNECTED
-- Activation: RELU, RELU6, TANH, SIGMOID, SOFTMAX
-- Pooling: MAX_POOL_2D, AVERAGE_POOL_2D
-- Element-wise: ADD, MUL, SUB, DIV
-- Shape manipulation: RESHAPE, TRANSPOSE, CONCATENATION, SQUEEZE, EXPAND_DIMS
-- And many more...
+**Comprehensive Operator Support (116+ operators)**:
+
+Based on the official TensorFlow Lite MLIR specification (https://www.tensorflow.org/mlir/tfl_ops), we support:
+
+- **Arithmetic & Math** (32 ops): ABS, ADD, ADD_N, CEIL, COS, DIV, EXP, FLOOR, FLOOR_DIV, FLOOR_MOD, LOG, MAXIMUM, MINIMUM, MUL, NEG, POW, RSQRT, SIN, SQRT, SQUARE, SQUARED_DIFFERENCE, SUB, and more
+- **Convolution & Pooling** (6 ops): AVERAGE_POOL_2D, CONV_2D, CONV_3D, DEPTHWISE_CONV_2D, MAX_POOL_2D, TRANSPOSE_CONV
+- **Fully Connected** (2 ops): FULLY_CONNECTED, BATCH_MATMUL
+- **Activation Functions** (11 ops): ELU, GELU, HARD_SWISH, LEAKY_RELU, LOGISTIC, LOG_SOFTMAX, PRELU, RELU, RELU6, SOFTMAX, TANH
+- **Normalization** (2 ops): L2_NORMALIZATION, LOCAL_RESPONSE_NORMALIZATION
+- **Reduction Operations** (6 ops): MEAN, REDUCE_MAX, REDUCE_MIN, REDUCE_PROD, REDUCE_ANY, SUM
+- **Shape & Tensor Manipulation** (36 ops): BATCH_TO_SPACE_ND, BROADCAST_TO, CONCATENATION, EXPAND_DIMS, GATHER, GATHER_ND, PAD, RESHAPE, SLICE, SPLIT, SQUEEZE, TILE, TRANSPOSE, and more
+- **Comparison Operations** (6 ops): EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL, NOT_EQUAL
+- **Logical Operations** (3 ops): LOGICAL_AND, LOGICAL_NOT, LOGICAL_OR
+- **Selection Operations** (5 ops): ARG_MAX, ARG_MIN, ONE_HOT, SELECT, SELECT_V2
+- **Recurrent Neural Networks** (6 ops): LSTM, BIDIRECTIONAL_SEQUENCE_LSTM, UNIDIRECTIONAL_SEQUENCE_LSTM, RNN, BIDIRECTIONAL_SEQUENCE_RNN, UNIDIRECTIONAL_SEQUENCE_RNN
+- **Quantization** (3 ops): QUANTIZE, DEQUANTIZE, FAKE_QUANT
+- **Type Conversion** (1 op): CAST
+- **Embedding & Lookup** (2 ops): EMBEDDING_LOOKUP, HASHTABLE_LOOKUP
+- **Advanced Operations** (5 ops): CUSTOM, CUMSUM, MATRIX_DIAG, MATRIX_SET_DIAG, SEGMENT_SUM
 
 ### Stage 3: FX Graph Reconstruction
 
