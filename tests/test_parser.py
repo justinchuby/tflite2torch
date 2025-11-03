@@ -3,7 +3,23 @@
 import os
 import tempfile
 import pytest
+import tensorflow as tf
 from tflite2torch._parser import TFLiteParser, TensorInfo, OperatorInfo, SubgraphInfo
+
+
+def create_test_tflite_model():
+    """Create a simple TFLite model for testing."""
+    # Create a simple Keras model
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(10,)),
+        tf.keras.layers.Dense(5, activation='relu', name='dense1'),
+    ])
+    
+    # Convert to TFLite
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    tflite_model = converter.convert()
+    
+    return tflite_model
 
 
 class TestTensorInfo:
@@ -81,19 +97,21 @@ class TestTFLiteParser:
         assert parser.subgraphs == []
         assert parser.version == 0
 
-    def test_parse_with_mock_file(self):
-        """Test parsing with a mock file."""
+    def test_parse_with_real_file(self):
+        """Test parsing with a real TFLite model."""
         parser = TFLiteParser()
         
-        # Create a temporary mock file
+        # Create a real TFLite model
+        tflite_model = create_test_tflite_model()
+        
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(tflite_model)
             temp_path = f.name
         
         try:
             subgraphs = parser.parse(temp_path)
             assert len(subgraphs) > 0
-            assert parser.version == 3
+            assert parser.version > 0
         finally:
             os.unlink(temp_path)
 
@@ -114,29 +132,54 @@ class TestTFLiteParser:
     def test_get_tensor_by_index(self):
         """Test getting tensor by index."""
         parser = TFLiteParser()
-        parser._parse_mock_model()
         
-        tensor = parser.get_tensor_by_index(0, 0)
-        assert tensor.name == "input"
-        assert tensor.shape == [1, 224, 224, 3]
+        # Create and parse a real TFLite model
+        tflite_model = create_test_tflite_model()
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
+            f.write(tflite_model)
+            temp_path = f.name
+        
+        try:
+            parser.parse(temp_path)
+            tensor = parser.get_tensor_by_index(0, 0)
+            assert tensor.index == 0
+            assert len(tensor.shape) > 0
+        finally:
+            os.unlink(temp_path)
 
     def test_get_input_tensors(self):
         """Test getting input tensors."""
         parser = TFLiteParser()
-        parser._parse_mock_model()
         
-        inputs = parser.get_input_tensors(0)
-        assert len(inputs) == 1
-        assert inputs[0].name == "input"
+        # Create and parse a real TFLite model
+        tflite_model = create_test_tflite_model()
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
+            f.write(tflite_model)
+            temp_path = f.name
+        
+        try:
+            parser.parse(temp_path)
+            inputs = parser.get_input_tensors(0)
+            assert len(inputs) >= 1
+        finally:
+            os.unlink(temp_path)
 
     def test_get_output_tensors(self):
         """Test getting output tensors."""
         parser = TFLiteParser()
-        parser._parse_mock_model()
         
-        outputs = parser.get_output_tensors(0)
-        assert len(outputs) == 1
-        assert outputs[0].name == "conv_output"
+        # Create and parse a real TFLite model
+        tflite_model = create_test_tflite_model()
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
+            f.write(tflite_model)
+            temp_path = f.name
+        
+        try:
+            parser.parse(temp_path)
+            outputs = parser.get_output_tensors(0)
+            assert len(outputs) >= 1
+        finally:
+            os.unlink(temp_path)
 
     def test_operator_codes_mapping(self):
         """Test operator codes are properly defined."""

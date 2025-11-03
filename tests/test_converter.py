@@ -3,6 +3,7 @@
 import os
 import tempfile
 import pytest
+import tensorflow as tf
 from torch.fx import GraphModule
 from tflite2torch.converter import (
     TFLiteToTorchConverter,
@@ -10,6 +11,21 @@ from tflite2torch.converter import (
     convert_tflite_to_graph_module,
     convert_tflite_to_exported_program,
 )
+
+
+def create_test_tflite_model():
+    """Create a simple TFLite model for testing."""
+    # Create a simple Keras model
+    model = tf.keras.Sequential([
+        tf.keras.layers.Input(shape=(10,)),
+        tf.keras.layers.Dense(5, activation='relu', name='dense1'),
+    ])
+    
+    # Convert to TFLite
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    tflite_model = converter.convert()
+    
+    return tflite_model
 
 
 class TestTFLiteToTorchConverter:
@@ -29,7 +45,7 @@ class TestTFLiteToTorchConverter:
         
         # Create a temporary mock file
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         try:
@@ -49,7 +65,7 @@ class TestTFLiteToTorchConverter:
         converter = TFLiteToTorchConverter()
         
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         try:
@@ -66,7 +82,7 @@ class TestTFLiteToTorchConverter:
         converter = TFLiteToTorchConverter()
         
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as f:
@@ -100,7 +116,7 @@ class TestTFLiteToTorchConverter:
         converter = TFLiteToTorchConverter()
         
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         try:
@@ -116,7 +132,7 @@ class TestConvertTFLiteToTorch:
     def test_convert_function_to_code(self):
         """Test convenience function for code generation."""
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         try:
@@ -129,7 +145,7 @@ class TestConvertTFLiteToTorch:
     def test_convert_function_to_graph_module(self):
         """Test convenience function for GraphModule."""
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         try:
@@ -141,7 +157,7 @@ class TestConvertTFLiteToTorch:
     def test_convert_function_with_output_path(self):
         """Test convenience function with output path."""
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as f:
@@ -159,7 +175,7 @@ class TestConvertTFLiteToTorch:
     def test_convert_function_to_exported_program(self):
         """Test convenience function for ExportedProgram."""
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
-            f.write(b"TFL3" + b"\x00" * 100)
+            f.write(create_test_tflite_model())
             temp_path = f.name
         
         try:

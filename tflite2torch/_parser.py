@@ -9,12 +9,7 @@ import struct
 from typing import Dict, List, Optional, Any
 import numpy as np
 
-try:
-    from tensorflow.lite.python import schema_py_generated as schema_fb
-    TFLITE_SCHEMA_AVAILABLE = True
-except ImportError:
-    TFLITE_SCHEMA_AVAILABLE = False
-    schema_fb = None
+from tensorflow.lite.python import schema_py_generated as schema_fb
 
 
 class TensorInfo:
@@ -241,18 +236,8 @@ class TFLiteParser:
         if len(model_data) < 4:
             raise ValueError("Invalid TFLite model file: too small")
 
-        # Parse using official TFLite schema if available
-        if TFLITE_SCHEMA_AVAILABLE and schema_fb:
-            try:
-                self._parse_tflite_model(model_data)
-            except Exception as e:
-                # Fall back to mock model if parsing fails
-                print(f"Warning: Failed to parse TFLite model, using mock data: {e}")
-                self._parse_mock_model()
-        else:
-            # Fall back to mock model if schema not available
-            print("Warning: TFLite schema not available, using mock data")
-            self._parse_mock_model()
+        # Parse using official TFLite schema
+        self._parse_tflite_model(model_data)
 
         return self.subgraphs
 
@@ -472,44 +457,6 @@ class TFLiteParser:
         """Get activation function name from code."""
         activation_map = {0: "NONE", 1: "RELU", 2: "RELU_N1_TO_1", 3: "RELU6", 4: "TANH", 5: "SIGN_BIT"}
         return activation_map.get(activation_code, "NONE")
-
-    def _parse_mock_model(self):
-        """
-        Create a mock model structure for demonstration.
-        In production, this would actually parse the FlatBuffer.
-        """
-        # Example: Simple model with one Conv2D operation
-        tensors = [
-            TensorInfo(name="input", shape=[1, 224, 224, 3], dtype="float32", index=0),
-            TensorInfo(name="conv_weight", shape=[32, 3, 3, 3], dtype="float32", index=1),
-            TensorInfo(name="conv_bias", shape=[32], dtype="float32", index=2),
-            TensorInfo(name="conv_output", shape=[1, 224, 224, 32], dtype="float32", index=3),
-        ]
-
-        operators = [
-            OperatorInfo(
-                op_type="CONV_2D",
-                inputs=[0, 1, 2],
-                outputs=[3],
-                builtin_options={
-                    "padding": "SAME",
-                    "stride_w": 1,
-                    "stride_h": 1,
-                    "fused_activation_function": "RELU",
-                },
-            )
-        ]
-
-        subgraph = SubgraphInfo(
-            tensors=tensors,
-            operators=operators,
-            inputs=[0],
-            outputs=[3],
-            name="main",
-        )
-
-        self.subgraphs = [subgraph]
-        self.version = 3
 
     def get_tensor_by_index(self, subgraph_idx: int, tensor_idx: int) -> TensorInfo:
         """Get a tensor by its index in a specific subgraph."""
