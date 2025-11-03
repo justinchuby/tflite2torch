@@ -194,13 +194,117 @@ class OperatorConverter:
 
         Returns:
             A callable that takes (graph: Graph, input_nodes: List[Node], 
-            weights: Dict, operator, subgraph, node_name: str, node_counter: Dict)
-            and returns a Node or tuple of Nodes representing the output.
+            weights: Dict, operator, subgraph, node_name: str, node_counter: Dict,
+            parameter_dict: Dict) and returns a Node or tuple of Nodes.
         """
         if op_type not in self.converters:
             raise NotImplementedError(f"Operator {op_type} is not supported yet")
 
-        return self.converters[op_type](inputs, options)
+        converter_result = self.converters[op_type](inputs, options)
+        
+        # If it's already a callable (new format), return it directly
+        if callable(converter_result):
+            return converter_result
+        
+        # Otherwise, it's the old dict format - wrap it in a callable
+        return self._wrap_legacy_converter(converter_result, op_type, inputs, options)
+    
+    def _wrap_legacy_converter(self, conv_info: Dict[str, Any], op_type: str, 
+                               inputs: List[Any], options: Dict[str, Any]) -> Callable:
+        """
+        Wrap legacy dict-based converter results in a callable that builds FX graph nodes.
+        This allows gradual migration to the new format.
+        """
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph from legacy converter info."""
+            from ._fx_reconstructor import FXReconstructor
+            
+            # Delegate to _fx_reconstructor's logic for now
+            # This is a temporary bridge during migration
+            reconstructor = FXReconstructor()
+            reconstructor.graph = graph
+            reconstructor.node_counter = node_counter['count']
+            reconstructor.parameter_dict = parameter_dict
+            
+            # Use the existing logic from FXReconstructor._process_operator
+            # but adapted for this context
+            if conv_info.get("custom", False):
+                # Use the custom operator handling from FXReconstructor
+                module_name = conv_info.get("module", "unknown")
+                output_node = reconstructor._handle_custom_operator(
+                    module_name, input_nodes, operator, subgraph, weights, node_name
+                )
+            elif isinstance(conv_info.get("module"), type) and issubclass(conv_info["module"], nn.Module):
+                # Module class - create instance and add to graph
+                params = conv_info.get("params", {})
+                # Infer parameters from operator if needed
+                # (This logic should be in the converter itself, but for legacy support...)
+                if conv_info["module"] == nn.Conv2d and len(operator.inputs) >= 2:
+                    weight_idx = operator.inputs[1]
+                    if weight_idx < len(subgraph.tensors):
+                        weight_info = subgraph.tensors[weight_idx]
+                        if len(weight_info.shape) == 4:
+                            params.setdefault("out_channels", weight_info.shape[0])
+                            params.setdefault("kernel_size", (weight_info.shape[1], weight_info.shape[2]))
+                            params.setdefault("in_channels", weight_info.shape[3])
+                            if len(operator.inputs) >= 3 and operator.inputs[2] >= 0:
+                                params.setdefault("bias", True)
+                            else:
+                                params.setdefault("bias", False)
+                
+                module = conv_info["module"](**params)
+                
+                # Load weights
+                if len(operator.inputs) >= 2:
+                    weight_idx = operator.inputs[1]
+                    if weight_idx in weights:
+                        weight_tensor = weights[weight_idx]
+                        if conv_info["module"] == nn.Conv2d:
+                            weight_tensor = weight_tensor.permute(0, 3, 1, 2)
+                        module.weight.data = weight_tensor
+                    
+                    if len(operator.inputs) >= 3:
+                        bias_idx = operator.inputs[2]
+                        if bias_idx >= 0 and bias_idx in weights and hasattr(module, 'bias') and module.bias is not None:
+                            module.bias.data = weights[bias_idx]
+                
+                module_name_str = f"module_{node_counter['count']}"
+                node_counter['count'] += 1
+                parameter_dict[module_name_str] = module
+                output_node = graph.call_module(module_name_str, args=(input_nodes[0],) if input_nodes else ())
+                output_node.name = node_name
+                
+                # Handle activation
+                if "activation" in conv_info and conv_info["activation"] != "NONE":
+                    activation_module = self.get_activation_module(conv_info["activation"])
+                    if activation_module:
+                        act_name = f"activation_{node_counter['count']}"
+                        node_counter['count'] += 1
+                        parameter_dict[act_name] = activation_module
+                        output_node = graph.call_module(act_name, args=(output_node,))
+                        output_node.name = f"{node_name}_activation"
+            else:
+                # Function - create call_function node
+                target = conv_info.get("module")
+                params = conv_info.get("params", {})
+                output_node = graph.call_function(target, args=tuple(input_nodes), kwargs=params)
+                output_node.name = node_name
+                
+                # Handle activation
+                if "activation" in conv_info and conv_info["activation"] != "NONE":
+                    activation_module = self.get_activation_module(conv_info["activation"])
+                    if activation_module:
+                        act_name = f"activation_{node_counter['count']}"
+                        node_counter['count'] += 1
+                        parameter_dict[act_name] = activation_module
+                        output_node = graph.call_module(act_name, args=(output_node,))
+                        output_node.name = f"{node_name}_activation"
+            
+            return output_node
+        
+        return build_graph
 
     def _simple_call_function(self, target: Callable, with_activation: bool = False) -> Callable:
         """Helper to create a simple call_function converter."""
