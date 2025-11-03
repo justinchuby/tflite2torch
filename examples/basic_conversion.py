@@ -1,8 +1,10 @@
 """
 Basic example of converting a TFLite model to PyTorch.
 
-This example demonstrates the main conversion API and shows how to use
-the generated PyTorch model.
+This example demonstrates the three main conversion APIs:
+1. convert_tflite_to_torch - Generates PyTorch code
+2. convert_tflite_to_graph_module - Creates a GraphModule for execution
+3. convert_tflite_to_exported_program - Creates an ExportedProgram
 """
 
 import sys
@@ -12,7 +14,11 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import torch
-from tflite2torch import convert_tflite_to_torch
+from tflite2torch import (
+    convert_tflite_to_torch,
+    convert_tflite_to_graph_module,
+    convert_tflite_to_exported_program,
+)
 
 
 def main():
@@ -35,13 +41,12 @@ def main():
     print(f"Converting TFLite model: {mock_tflite_path}")
     print()
     
-    # Method 1: Convert and get generated code as string
+    # Method 1: Generate PyTorch code
     print("Method 1: Generate PyTorch code")
     print("-" * 70)
     code = convert_tflite_to_torch(
         tflite_model_path=mock_tflite_path,
-        output_path="/tmp/converted_model.py",
-        generate_code=True
+        output_path="/tmp/converted_model.py"
     )
     print("\nGenerated code:")
     print(code)
@@ -51,9 +56,8 @@ def main():
     print("\n" + "=" * 70)
     print("Method 2: Convert to GraphModule")
     print("-" * 70)
-    graph_module = convert_tflite_to_torch(
-        tflite_model_path=mock_tflite_path,
-        generate_code=False
+    graph_module = convert_tflite_to_graph_module(
+        tflite_model_path=mock_tflite_path
     )
     
     print(f"\nGraphModule type: {type(graph_module)}")
@@ -69,6 +73,27 @@ def main():
         print("✓ Model execution successful!")
     except Exception as e:
         print(f"Note: Model execution test: {e}")
+    
+    # Method 3: Convert to ExportedProgram (requires PyTorch 2.0+)
+    print("\n" + "=" * 70)
+    print("Method 3: Convert to ExportedProgram")
+    print("-" * 70)
+    try:
+        # Provide example inputs for export
+        example_inputs = (torch.randn(1, 3, 224, 224),)
+        exported_program = convert_tflite_to_exported_program(
+            tflite_model_path=mock_tflite_path,
+            example_inputs=example_inputs
+        )
+        
+        if exported_program is not None:
+            print(f"\nExportedProgram type: {type(exported_program)}")
+            print("✓ ExportedProgram created successfully!")
+        else:
+            print("\nNote: ExportedProgram creation returned None")
+            print("(torch.export may not be available or export failed)")
+    except Exception as e:
+        print(f"\nNote: ExportedProgram creation: {e}")
     
     print("\n" + "=" * 70)
     print("Example completed successfully!")
