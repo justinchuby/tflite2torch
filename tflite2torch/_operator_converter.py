@@ -228,14 +228,16 @@ class OperatorConverter:
             reconstructor.node_counter = node_counter['count']
             reconstructor.parameter_dict = parameter_dict
             
-            # Use the existing logic from FXReconstructor._process_operator
-            # but adapted for this context
+            # Handle different types of legacy converters
             if conv_info.get("custom", False):
-                # Use the custom operator handling from FXReconstructor
-                module_name = conv_info.get("module", "unknown")
-                output_node = reconstructor._handle_custom_operator(
-                    module_name, input_nodes, operator, subgraph, weights, node_name
+                # Custom operators were marked for special handling
+                # For now, create a simple pass-through node
+                # (These should all be converted to the new format)
+                output_node = graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
                 )
+                output_node.name = node_name
             elif isinstance(conv_info.get("module"), type) and issubclass(conv_info["module"], nn.Module):
                 # Module class - create instance and add to graph
                 params = conv_info.get("params", {})
@@ -253,6 +255,17 @@ class OperatorConverter:
                                 params.setdefault("bias", True)
                             else:
                                 params.setdefault("bias", False)
+                elif conv_info["module"] == nn.Linear and len(operator.inputs) >= 2:
+                    weight_idx = operator.inputs[1]
+                    if weight_idx < len(subgraph.tensors):
+                        weight_info = subgraph.tensors[weight_idx]
+                        if len(weight_info.shape) == 2:
+                            params.setdefault("out_features", weight_info.shape[0])
+                            params.setdefault("in_features", weight_info.shape[1])
+                            if len(operator.inputs) >= 3 and operator.inputs[2] >= 0:
+                                params.setdefault("bias", True)
+                            else:
+                                params.setdefault("bias", False)
                 
                 module = conv_info["module"](**params)
                 
@@ -262,6 +275,8 @@ class OperatorConverter:
                     if weight_idx in weights:
                         weight_tensor = weights[weight_idx]
                         if conv_info["module"] == nn.Conv2d:
+                            # TFLite: [out_channels, kernel_h, kernel_w, in_channels]
+                            # PyTorch: [out_channels, in_channels, kernel_h, kernel_w]
                             weight_tensor = weight_tensor.permute(0, 3, 1, 2)
                         module.weight.data = weight_tensor
                     
