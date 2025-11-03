@@ -2,12 +2,14 @@
 TFLite to Torch operator conversion module.
 
 This module provides mappings and conversions from TFLite operators
-to their PyTorch equivalents.
+to their PyTorch equivalents. Each converter returns a function that
+directly constructs FX graph nodes.
 """
 
-from typing import Dict, List, Any, Callable, Optional
+from typing import Dict, List, Any, Callable, Optional, Tuple, Union
 import torch
 import torch.nn as nn
+from torch.fx import Graph, Node
 
 
 class OperatorConverter:
@@ -15,7 +17,8 @@ class OperatorConverter:
     Converts TFLite operators to PyTorch equivalents.
 
     This class maintains a registry of conversion functions that map
-    TFLite operators to PyTorch operations.
+    TFLite operators to callables that directly construct FX graph nodes.
+    All conversion logic is consolidated here - no more "custom" operators.
     """
 
     def __init__(self):
@@ -180,9 +183,9 @@ class OperatorConverter:
 
     def convert(
         self, op_type: str, inputs: List[Any], options: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    ) -> Callable:
         """
-        Convert a TFLite operator to PyTorch.
+        Convert a TFLite operator to a graph construction function.
 
         Args:
             op_type: TFLite operator type
@@ -190,17 +193,58 @@ class OperatorConverter:
             options: Operator-specific options
 
         Returns:
-            Dictionary containing PyTorch operator information including:
-            - 'module': PyTorch module class or function
-            - 'params': Parameters for the module
-            - 'forward_fn': Optional custom forward function
+            A callable that takes (graph: Graph, input_nodes: List[Node], 
+            weights: Dict, operator, subgraph, node_name: str, node_counter: Dict)
+            and returns a Node or tuple of Nodes representing the output.
         """
         if op_type not in self.converters:
             raise NotImplementedError(f"Operator {op_type} is not supported yet")
 
         return self.converters[op_type](inputs, options)
 
-    def _convert_conv2d(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _simple_call_function(self, target: Callable, with_activation: bool = False) -> Callable:
+        """Helper to create a simple call_function converter."""
+        def converter(inputs: List[Any], options: Dict[str, Any]) -> Callable:
+            activation = options.get("fused_activation_function", "NONE") if with_activation else "NONE"
+            
+            def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                           operator, subgraph, node_name: str, node_counter: Dict,
+                           parameter_dict: Dict) -> Node:
+                output_node = graph.call_function(target, args=tuple(input_nodes))
+                output_node.name = node_name
+                
+                if activation != "NONE":
+                    activation_module = self.get_activation_module(activation)
+                    if activation_module is not None:
+                        act_name = f"activation_{node_counter['count']}"
+                        node_counter['count'] += 1
+                        parameter_dict[act_name] = activation_module
+                        output_node = graph.call_module(act_name, args=(output_node,))
+                        output_node.name = f"{node_name}_activation"
+                
+                return output_node
+            return build_graph
+        return converter
+
+    def _simple_call_module(self, module_class: type, **default_params) -> Callable:
+        """Helper to create a simple call_module converter."""
+        def converter(inputs: List[Any], options: Dict[str, Any]) -> Callable:
+            params = {**default_params, **{k: v for k, v in options.items() if k in default_params}}
+            
+            def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                           operator, subgraph, node_name: str, node_counter: Dict,
+                           parameter_dict: Dict) -> Node:
+                module = module_class(**params)
+                module_name = f"module_{node_counter['count']}"
+                node_counter['count'] += 1
+                parameter_dict[module_name] = module
+                output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+                output_node.name = node_name
+                return output_node
+            return build_graph
+        return converter
+
+    def _convert_conv2d(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite CONV_2D to PyTorch Conv2d."""
         # Extract parameters from options
         stride_h = options.get("stride_h", 1)
@@ -208,26 +252,85 @@ class OperatorConverter:
         padding = options.get("padding", "SAME")
         dilation_h = options.get("dilation_h_factor", 1)
         dilation_w = options.get("dilation_w_factor", 1)
+        activation = options.get("fused_activation_function", "NONE")
 
         # Convert padding from TFLite to PyTorch format
         if padding == "SAME":
-            # PyTorch doesn't directly support "SAME" padding
-            # Will need to compute padding values
             padding_mode = "same"
         elif padding == "VALID":
             padding_mode = 0
         else:
             padding_mode = 0
 
-        return {
-            "module": nn.Conv2d,
-            "params": {
-                "stride": (stride_h, stride_w),
-                "padding": padding_mode,
-                "dilation": (dilation_h, dilation_w),
-            },
-            "activation": options.get("fused_activation_function", "NONE"),
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph nodes for Conv2d."""
+            # Extract weight tensor shape to determine conv parameters
+            if len(operator.inputs) >= 2:
+                weight_idx = operator.inputs[1]
+                weight_tensor_info = subgraph.tensors[weight_idx]
+                # TFLite weight format: [out_channels, kernel_h, kernel_w, in_channels]
+                if len(weight_tensor_info.shape) == 4:
+                    out_channels = weight_tensor_info.shape[0]
+                    kernel_size = (weight_tensor_info.shape[1], weight_tensor_info.shape[2])
+                    in_channels = weight_tensor_info.shape[3]
+                    
+                    # Check if bias exists
+                    has_bias = len(operator.inputs) >= 3 and operator.inputs[2] >= 0
+                    
+                    # Create Conv2d module
+                    params = {
+                        "in_channels": in_channels,
+                        "out_channels": out_channels,
+                        "kernel_size": kernel_size,
+                        "stride": (stride_h, stride_w),
+                        "padding": padding_mode,
+                        "dilation": (dilation_h, dilation_w),
+                        "bias": has_bias
+                    }
+                    module = nn.Conv2d(**params)
+                    
+                    # Load weights
+                    if weight_idx in weights:
+                        weight_tensor = weights[weight_idx]
+                        # Convert from TFLite format to PyTorch format
+                        # TFLite: [out_channels, kernel_h, kernel_w, in_channels]
+                        # PyTorch: [out_channels, in_channels, kernel_h, kernel_w]
+                        weight_tensor = weight_tensor.permute(0, 3, 1, 2)
+                        module.weight.data = weight_tensor
+                    
+                    # Load bias if exists
+                    if has_bias:
+                        bias_idx = operator.inputs[2]
+                        if bias_idx in weights and module.bias is not None:
+                            module.bias.data = weights[bias_idx]
+                    
+                    # Add module to parameter dict
+                    module_name = f"module_{node_counter['count']}"
+                    node_counter['count'] += 1
+                    parameter_dict[module_name] = module
+                    
+                    # Create call_module node
+                    output_node = graph.call_module(module_name, args=(input_nodes[0],))
+                    output_node.name = node_name
+                    
+                    # Handle fused activation
+                    if activation != "NONE":
+                        activation_module = self.get_activation_module(activation)
+                        if activation_module is not None:
+                            act_name = f"activation_{node_counter['count']}"
+                            node_counter['count'] += 1
+                            parameter_dict[act_name] = activation_module
+                            output_node = graph.call_module(act_name, args=(output_node,))
+                            output_node.name = f"{node_name}_activation"
+                    
+                    return output_node
+            
+            # Fallback: create a placeholder node
+            return graph.call_function(lambda x: x, args=(input_nodes[0],) if input_nodes else ())
+        
+        return build_graph
 
     def _convert_depthwise_conv2d(
         self, inputs: List[Any], options: Dict[str, Any]
@@ -264,70 +367,143 @@ class OperatorConverter:
             "activation": options.get("fused_activation_function", "NONE"),
         }
 
-    def _convert_add(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_add(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite ADD to PyTorch addition."""
-        return {
-            "module": torch.add,
-            "params": {},
-            "activation": options.get("fused_activation_function", "NONE"),
-        }
+        activation = options.get("fused_activation_function", "NONE")
+        
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph nodes for ADD."""
+            output_node = graph.call_function(torch.add, args=tuple(input_nodes))
+            output_node.name = node_name
+            
+            # Handle fused activation
+            if activation != "NONE":
+                activation_module = self.get_activation_module(activation)
+                if activation_module is not None:
+                    act_name = f"activation_{node_counter['count']}"
+                    node_counter['count'] += 1
+                    parameter_dict[act_name] = activation_module
+                    output_node = graph.call_module(act_name, args=(output_node,))
+                    output_node.name = f"{node_name}_activation"
+            
+            return output_node
+        
+        return build_graph
 
-    def _convert_mul(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_mul(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite MUL to PyTorch multiplication."""
-        return {
-            "module": torch.mul,
-            "params": {},
-            "activation": options.get("fused_activation_function", "NONE"),
-        }
+        activation = options.get("fused_activation_function", "NONE")
+        
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            output_node = graph.call_function(torch.mul, args=tuple(input_nodes))
+            output_node.name = node_name
+            
+            if activation != "NONE":
+                activation_module = self.get_activation_module(activation)
+                if activation_module is not None:
+                    act_name = f"activation_{node_counter['count']}"
+                    node_counter['count'] += 1
+                    parameter_dict[act_name] = activation_module
+                    output_node = graph.call_module(act_name, args=(output_node,))
+                    output_node.name = f"{node_name}_activation"
+            
+            return output_node
+        
+        return build_graph
 
-    def _convert_sub(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_sub(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite SUB to PyTorch subtraction."""
-        return {
-            "module": torch.sub,
-            "params": {},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            output_node = graph.call_function(torch.sub, args=tuple(input_nodes))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_div(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_div(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite DIV to PyTorch division."""
-        return {
-            "module": torch.div,
-            "params": {},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            output_node = graph.call_function(torch.div, args=tuple(input_nodes))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_relu(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_relu(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite RELU to PyTorch ReLU."""
-        return {
-            "module": nn.ReLU,
-            "params": {},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            module = nn.ReLU()
+            module_name = f"module_{node_counter['count']}"
+            node_counter['count'] += 1
+            parameter_dict[module_name] = module
+            output_node = graph.call_module(module_name, args=(input_nodes[0],))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_relu6(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_relu6(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite RELU6 to PyTorch ReLU6."""
-        return {
-            "module": nn.ReLU6,
-            "params": {},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            module = nn.ReLU6()
+            module_name = f"module_{node_counter['count']}"
+            node_counter['count'] += 1
+            parameter_dict[module_name] = module
+            output_node = graph.call_module(module_name, args=(input_nodes[0],))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_tanh(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_tanh(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite TANH to PyTorch Tanh."""
-        return {
-            "module": nn.Tanh,
-            "params": {},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            module = nn.Tanh()
+            module_name = f"module_{node_counter['count']}"
+            node_counter['count'] += 1
+            parameter_dict[module_name] = module
+            output_node = graph.call_module(module_name, args=(input_nodes[0],))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_sigmoid(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_sigmoid(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite LOGISTIC to PyTorch Sigmoid."""
-        return {
-            "module": nn.Sigmoid,
-            "params": {},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            module = nn.Sigmoid()
+            module_name = f"module_{node_counter['count']}"
+            node_counter['count'] += 1
+            parameter_dict[module_name] = module
+            output_node = graph.call_module(module_name, args=(input_nodes[0],))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_softmax(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_softmax(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite SOFTMAX to PyTorch Softmax."""
-        return {
-            "module": nn.Softmax,
-            "params": {"dim": -1},
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            module = nn.Softmax(dim=-1)
+            module_name = f"module_{node_counter['count']}"
+            node_counter['count'] += 1
+            parameter_dict[module_name] = module
+            output_node = graph.call_module(module_name, args=(input_nodes[0],))
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
     def _convert_max_pool2d(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite MAX_POOL_2D to PyTorch MaxPool2d."""
