@@ -174,6 +174,9 @@ class OperatorConverter:
         self.converters["MATRIX_DIAG"] = self._convert_matrix_diag
         self.converters["MATRIX_SET_DIAG"] = self._convert_matrix_set_diag
         self.converters["SEGMENT_SUM"] = self._convert_segment_sum
+        
+        # Signal Processing Operations
+        self.converters["RFFT2D"] = self._convert_rfft2d
 
     def convert(
         self, op_type: str, inputs: List[Any], options: Dict[str, Any]
@@ -371,42 +374,66 @@ class OperatorConverter:
         }
 
     def _convert_reshape(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite RESHAPE to PyTorch reshape."""
+        """Convert TFLite RESHAPE to PyTorch reshape.
+        
+        RESHAPE takes 2 inputs: input tensor and shape tensor.
+        The shape tensor needs to be converted to a tuple.
+        """
         return {
-            "module": torch.reshape,
+            "module": "reshape",
             "params": {},
+            "custom": True,
         }
 
     def _convert_concatenation(
         self, inputs: List[Any], options: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Convert TFLite CONCATENATION to PyTorch cat."""
+        """Convert TFLite CONCATENATION to PyTorch cat.
+        
+        CONCATENATION takes multiple input tensors and concatenates them.
+        The axis is specified in options.
+        """
         axis = options.get("axis", 0)
         return {
-            "module": torch.cat,
-            "params": {"dim": axis},
+            "module": "concatenation",
+            "params": {"axis": axis},
+            "custom": True,
         }
 
     def _convert_transpose(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite TRANSPOSE to PyTorch permute."""
+        """Convert TFLite TRANSPOSE to PyTorch permute.
+        
+        TRANSPOSE takes 2 inputs: input tensor and perm tensor.
+        The perm tensor needs to be converted to a tuple.
+        """
         return {
-            "module": torch.permute,
+            "module": "transpose",
             "params": {},
+            "custom": True,
         }
 
     def _convert_mean(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite MEAN to PyTorch mean."""
+        """Convert TFLite MEAN to PyTorch mean.
+        
+        MEAN takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
         return {
-            "module": torch.mean,
-            "params": {"keepdim": keep_dims},
+            "module": "mean",
+            "params": {"keep_dims": keep_dims},
+            "custom": True,
         }
 
     def _convert_pad(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite PAD to PyTorch pad."""
+        """Convert TFLite PAD to PyTorch pad.
+        
+        PAD takes 2 inputs: input tensor and paddings tensor.
+        The paddings tensor needs to be converted to a tuple.
+        """
         return {
-            "module": torch.nn.functional.pad,
+            "module": "pad",
             "params": {},
+            "custom": True,
         }
 
     def _convert_squeeze(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
@@ -634,14 +661,20 @@ class OperatorConverter:
     
     # Additional Reduction Operations
     def _convert_reduce_max(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite REDUCE_MAX to PyTorch max."""
+        """Convert TFLite REDUCE_MAX to PyTorch max.
+        
+        REDUCE_MAX takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
-        return {"module": torch.max, "params": {"keepdim": keep_dims}}
+        return {"module": "reduce_max", "params": {"keep_dims": keep_dims}, "custom": True}
     
     def _convert_reduce_min(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite REDUCE_MIN to PyTorch min."""
+        """Convert TFLite REDUCE_MIN to PyTorch min.
+        
+        REDUCE_MIN takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
-        return {"module": torch.min, "params": {"keepdim": keep_dims}}
+        return {"module": "reduce_min", "params": {"keep_dims": keep_dims}, "custom": True}
     
     def _convert_reduce_prod(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite REDUCE_PROD to PyTorch prod."""
@@ -654,9 +687,12 @@ class OperatorConverter:
         return {"module": torch.any, "params": {"keepdim": keep_dims}}
     
     def _convert_sum(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite SUM to PyTorch sum."""
+        """Convert TFLite SUM to PyTorch sum.
+        
+        SUM takes 2 inputs: input tensor and reduction_indices tensor.
+        """
         keep_dims = options.get("keep_dims", False)
-        return {"module": torch.sum, "params": {"keepdim": keep_dims}}
+        return {"module": "sum", "params": {"keep_dims": keep_dims}, "custom": True}
     
     # Additional Shape & Tensor Manipulation
     def _convert_broadcast_args(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
@@ -686,9 +722,13 @@ class OperatorConverter:
         return {"module": torch.nn.functional.pad, "params": {"mode": "reflect"}}
     
     def _convert_pack(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite PACK to PyTorch stack."""
+        """Convert TFLite PACK to PyTorch stack.
+        
+        PACK takes multiple input tensors and stacks them along a new dimension.
+        PyTorch stack expects tensors as a sequence (tuple/list).
+        """
         axis = options.get("axis", 0)
-        return {"module": torch.stack, "params": {"dim": axis}}
+        return {"module": "pack", "params": {"axis": axis}, "custom": True}
     
     def _convert_padv2(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite PADV2 to PyTorch pad."""
@@ -888,6 +928,19 @@ class OperatorConverter:
     def _convert_segment_sum(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite SEGMENT_SUM to PyTorch segment operations."""
         return {"module": "segment_sum", "params": {}, "custom": True}
+    
+    # Signal Processing Operations
+    def _convert_rfft2d(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert TFLite RFFT2D to PyTorch fft.rfft2.
+        
+        RFFT2D takes 2 inputs:
+        - input tensor (signal)
+        - fft_length tensor (shape [2])
+        
+        The fft_length needs to be converted to a tuple for PyTorch.
+        """
+        return {"module": "rfft2d", "params": {}, "custom": True}
 
     def get_activation_module(self, activation: str) -> Optional[nn.Module]:
         """

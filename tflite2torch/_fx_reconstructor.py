@@ -131,7 +131,12 @@ class FXReconstructor:
         # Create FX node based on conversion info
         node_name = f"{op_type.lower()}_{op_idx}"
         
-        if isinstance(conv_info["module"], type) and issubclass(
+        # Handle custom operators that need special processing
+        if conv_info.get("custom", False) and isinstance(conv_info["module"], str):
+            output_node = self._handle_custom_operator(
+                conv_info["module"], input_nodes, operator, subgraph, weights, node_name
+            )
+        elif isinstance(conv_info["module"], type) and issubclass(
             conv_info["module"], nn.Module
         ):
             # It's a module class - create a module instance
@@ -235,6 +240,264 @@ class FXReconstructor:
         # Map output tensor indices to the output node
         for output_idx in operator.outputs:
             self.tensor_map[output_idx] = output_node
+    
+    def _handle_custom_operator(
+        self,
+        op_name: str,
+        input_nodes: List[Node],
+        operator: OperatorInfo,
+        subgraph: SubgraphInfo,
+        weights: Dict[int, torch.Tensor],
+        node_name: str,
+    ) -> Node:
+        """Handle custom operators that need special processing."""
+        if op_name == "rfft2d":
+            # RFFT2D takes 2 inputs: signal tensor and fft_length tensor
+            # We need to convert the fft_length from a tensor to a tuple
+            if len(input_nodes) >= 2:
+                signal_node = input_nodes[0]
+                # Get the fft_length tensor value
+                fft_length_idx = operator.inputs[1]
+                if fft_length_idx in weights:
+                    fft_length_tensor = weights[fft_length_idx]
+                    # Convert to tuple of ints
+                    fft_length = tuple(fft_length_tensor.tolist())
+                    # Create the rfft2 call with signal and s parameter
+                    output_node = self.graph.call_function(
+                        torch.fft.rfft2,
+                        args=(signal_node,),
+                        kwargs={"s": fft_length}
+                    )
+                else:
+                    # If fft_length is not available as a constant, call without s
+                    output_node = self.graph.call_function(
+                        torch.fft.rfft2,
+                        args=(signal_node,)
+                    )
+            else:
+                # Only signal input provided
+                output_node = self.graph.call_function(
+                    torch.fft.rfft2,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "reshape":
+            # RESHAPE takes 2 inputs: input tensor and shape tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                shape_idx = operator.inputs[1]
+                if shape_idx in weights:
+                    shape_tensor = weights[shape_idx]
+                    shape_tuple = tuple(shape_tensor.tolist())
+                    output_node = self.graph.call_function(
+                        torch.reshape,
+                        args=(input_node, shape_tuple)
+                    )
+                else:
+                    # If shape is not available as constant, use -1 for unknown dimension
+                    output_node = self.graph.call_function(
+                        torch.reshape,
+                        args=(input_node, (-1,))
+                    )
+            else:
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "transpose":
+            # TRANSPOSE takes 2 inputs: input tensor and perm tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                perm_idx = operator.inputs[1]
+                if perm_idx in weights:
+                    perm_tensor = weights[perm_idx]
+                    perm_tuple = tuple(perm_tensor.tolist())
+                    output_node = self.graph.call_function(
+                        torch.permute,
+                        args=(input_node, perm_tuple)
+                    )
+                else:
+                    # If perm is not available, pass through
+                    output_node = self.graph.call_function(
+                        lambda x: x,
+                        args=(input_node,)
+                    )
+            else:
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "concatenation":
+            # CONCATENATION takes multiple input tensors
+            # The axis is in the params
+            axis = operator.builtin_options.get("axis", 0)
+            if len(input_nodes) > 0:
+                output_node = self.graph.call_function(
+                    torch.cat,
+                    args=(tuple(input_nodes),),
+                    kwargs={"dim": axis}
+                )
+            else:
+                output_node = self.graph.call_function(
+                    lambda *args: args[0] if args else None,
+                    args=()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "pad":
+            # PAD takes 2 inputs: input tensor and paddings tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                paddings_idx = operator.inputs[1]
+                if paddings_idx in weights:
+                    paddings_tensor = weights[paddings_idx]
+                    # TFLite padding format: [[top, bottom], [left, right], ...]
+                    # PyTorch pad format: (left, right, top, bottom, ...)
+                    # Need to reverse and flatten
+                    paddings_np = paddings_tensor.numpy()
+                    # Reverse the order and flatten
+                    pad_list = []
+                    for i in range(len(paddings_np) - 1, -1, -1):
+                        pad_list.extend([int(paddings_np[i][0]), int(paddings_np[i][1])])
+                    output_node = self.graph.call_function(
+                        torch.nn.functional.pad,
+                        args=(input_node, tuple(pad_list))
+                    )
+                else:
+                    # If padding is not available, pass through
+                    output_node = self.graph.call_function(
+                        lambda x: x,
+                        args=(input_node,)
+                    )
+            else:
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "pack":
+            # PACK takes multiple input tensors and stacks them
+            axis = operator.builtin_options.get("axis", 0)
+            if len(input_nodes) > 0:
+                output_node = self.graph.call_function(
+                    torch.stack,
+                    args=(tuple(input_nodes),),
+                    kwargs={"dim": axis}
+                )
+            else:
+                output_node = self.graph.call_function(
+                    lambda *args: args[0] if args else None,
+                    args=()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name in ("mean", "sum", "reduce_max", "reduce_min"):
+            # Reduction operators take 2 inputs: input tensor and reduction_indices tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                axis_idx = operator.inputs[1]
+                keep_dims = operator.builtin_options.get("keep_dims", False)
+                
+                # Infer keep_dims from output shape if not in options
+                # If output has same rank as input, keep_dims is True
+                if not keep_dims and len(operator.outputs) > 0:
+                    input_idx = operator.inputs[0]
+                    output_idx = operator.outputs[0]
+                    if input_idx < len(subgraph.tensors) and output_idx < len(subgraph.tensors):
+                        input_shape = subgraph.tensors[input_idx].shape
+                        output_shape = subgraph.tensors[output_idx].shape
+                        if len(input_shape) == len(output_shape):
+                            keep_dims = True
+                
+                if axis_idx in weights:
+                    axis_tensor = weights[axis_idx]
+                    # Convert axis tensor to int or tuple of ints
+                    axis_list = axis_tensor.tolist()
+                    if isinstance(axis_list, list):
+                        axis = tuple(axis_list) if len(axis_list) > 1 else axis_list[0]
+                    else:
+                        axis = axis_list
+                    
+                    # Create appropriate PyTorch call
+                    if op_name == "mean":
+                        output_node = self.graph.call_function(
+                            torch.mean,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                    elif op_name == "sum":
+                        output_node = self.graph.call_function(
+                            torch.sum,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                    elif op_name == "reduce_max":
+                        # torch.max with dim returns (values, indices)
+                        # We need just the values
+                        max_node = self.graph.call_function(
+                            torch.max,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                        # Extract the values (first element of the named tuple)
+                        output_node = self.graph.call_function(
+                            lambda x: x.values if hasattr(x, 'values') else x,
+                            args=(max_node,)
+                        )
+                    elif op_name == "reduce_min":
+                        # torch.min with dim returns (values, indices)
+                        # We need just the values
+                        min_node = self.graph.call_function(
+                            torch.min,
+                            args=(input_node,),
+                            kwargs={"dim": axis, "keepdim": keep_dims}
+                        )
+                        # Extract the values (first element of the named tuple)
+                        output_node = self.graph.call_function(
+                            lambda x: x.values if hasattr(x, 'values') else x,
+                            args=(min_node,)
+                        )
+                else:
+                    # If axis is not available, reduce all dimensions
+                    if op_name == "mean":
+                        output_node = self.graph.call_function(torch.mean, args=(input_node,))
+                    elif op_name == "sum":
+                        output_node = self.graph.call_function(torch.sum, args=(input_node,))
+                    elif op_name == "reduce_max":
+                        output_node = self.graph.call_function(torch.max, args=(input_node,))
+                    else:  # reduce_min
+                        output_node = self.graph.call_function(torch.min, args=(input_node,))
+            else:
+                # Only one input provided
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "cast":
+            # CAST operator
+            # For now, just pass through the input
+            output_node = self.graph.call_function(
+                lambda x: x,
+                args=(input_nodes[0],) if input_nodes else ()
+            )
+            output_node.name = node_name
+            return output_node
+        else:
+            # Generic custom operator - create a lambda that passes through
+            output_node = self.graph.call_function(
+                lambda *args: args[0] if args else None,
+                args=tuple(input_nodes) if input_nodes else ()
+            )
+            output_node.name = node_name
+            return output_node
 
     def _create_root_module(self) -> nn.Module:
         """Create a module containing all parameters and sub-modules."""
@@ -243,7 +506,12 @@ class FXReconstructor:
             if isinstance(value, nn.Module):
                 root.add_module(name, value)
             elif isinstance(value, torch.Tensor):
-                root.register_parameter(name, nn.Parameter(value))
+                # Only register as parameter if it's a floating point or complex tensor
+                # Integer tensors should be registered as buffers instead
+                if value.dtype in (torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128):
+                    root.register_parameter(name, nn.Parameter(value))
+                else:
+                    root.register_buffer(name, value)
         return root
 
     def _sanitize_name(self, name: str) -> str:

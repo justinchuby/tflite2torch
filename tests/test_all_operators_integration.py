@@ -1013,5 +1013,39 @@ class TestCastOperator:
         assert compare_outputs(tflite_output, torch_output, op_name="CAST")
 
 
+class TestSignalProcessingOperators:
+    """Test signal processing operators."""
+    
+    def test_rfft2d_operator(self, tmp_path):
+        """Test RFFT2D operator."""
+        # Create a simple model using RFFT2D
+        input_layer = tf.keras.layers.Input(shape=(8, 8), dtype=tf.float32)
+        output = tf.keras.layers.Lambda(lambda x: tf.signal.rfft2d(x))(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "rfft2d_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        # Test
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 8, 8).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        # RFFT2D outputs complex numbers, so we need to handle comparison differently
+        # PyTorch returns complex tensors, TFLite returns them as complex64 numpy array
+        if isinstance(torch_output, torch.Tensor) and torch_output.is_complex():
+            # Convert PyTorch complex to numpy complex for comparison
+            torch_output_np = torch_output.detach().numpy()
+            assert compare_outputs(tflite_output, torch_output_np, rtol=1e-3, atol=1e-3, op_name="RFFT2D")
+        else:
+            assert compare_outputs(tflite_output, torch_output, rtol=1e-3, atol=1e-3, op_name="RFFT2D")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
