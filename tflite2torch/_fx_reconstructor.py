@@ -11,8 +11,8 @@ import torch.nn as nn
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.node import Argument
 
-from .parser import SubgraphInfo, TensorInfo, OperatorInfo
-from .operator_converter import OperatorConverter
+from ._parser import SubgraphInfo, TensorInfo, OperatorInfo
+from ._operator_converter import OperatorConverter
 
 
 class FXReconstructor:

@@ -10,10 +10,10 @@ import os
 import torch
 from torch.fx import GraphModule
 
-from .parser import TFLiteParser
-from .operator_converter import OperatorConverter
-from .fx_reconstructor import FXReconstructor
-from .code_renderer import CodeRenderer
+from ._parser import TFLiteParser
+from ._operator_converter import OperatorConverter
+from ._fx_reconstructor import FXReconstructor
+from ._code_renderer import CodeRenderer
 
 
 class TFLiteToTorchConverter:

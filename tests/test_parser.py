@@ -3,7 +3,7 @@
 import os
 import tempfile
 import pytest
-from tflite2torch.parser import TFLiteParser, TensorInfo, OperatorInfo, SubgraphInfo
+from tflite2torch._parser import TFLiteParser, TensorInfo, OperatorInfo, SubgraphInfo
 
 
 class TestTensorInfo:

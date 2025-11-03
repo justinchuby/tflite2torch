@@ -3,7 +3,7 @@
 import pytest
 import torch
 import torch.nn as nn
-from tflite2torch.operator_converter import OperatorConverter
+from tflite2torch._operator_converter import OperatorConverter
 
 
 class TestOperatorConverter:
