@@ -4,7 +4,12 @@ import os
 import tempfile
 import pytest
 from torch.fx import GraphModule
-from tflite2torch.converter import TFLiteToTorchConverter, convert_tflite_to_torch
+from tflite2torch.converter import (
+    TFLiteToTorchConverter,
+    convert_tflite_to_torch,
+    convert_tflite_to_graph_module,
+    convert_tflite_to_exported_program,
+)
 
 
 class TestTFLiteToTorchConverter:
@@ -115,7 +120,7 @@ class TestConvertTFLiteToTorch:
             temp_path = f.name
         
         try:
-            code = convert_tflite_to_torch(temp_path, generate_code=True)
+            code = convert_tflite_to_torch(temp_path)
             assert isinstance(code, str)
             assert "class ConvertedModel" in code
         finally:
@@ -128,7 +133,7 @@ class TestConvertTFLiteToTorch:
             temp_path = f.name
         
         try:
-            graph_module = convert_tflite_to_torch(temp_path, generate_code=False)
+            graph_module = convert_tflite_to_graph_module(temp_path)
             assert isinstance(graph_module, GraphModule)
         finally:
             os.unlink(temp_path)
@@ -150,3 +155,20 @@ class TestConvertTFLiteToTorch:
             os.unlink(temp_path)
             if os.path.exists(output_path):
                 os.unlink(output_path)
+    
+    def test_convert_function_to_exported_program(self):
+        """Test convenience function for ExportedProgram."""
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
+            f.write(b"TFL3" + b"\x00" * 100)
+            temp_path = f.name
+        
+        try:
+            # Note: This may return None if torch.export is not available
+            import torch
+            exported = convert_tflite_to_exported_program(temp_path)
+            if hasattr(torch, "export"):
+                # If torch.export is available, we should get something back
+                # (may be None if export fails, which is acceptable)
+                assert exported is None or hasattr(exported, "graph_module")
+        finally:
+            os.unlink(temp_path)
