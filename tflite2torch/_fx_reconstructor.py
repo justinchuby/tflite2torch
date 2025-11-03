@@ -282,6 +282,121 @@ class FXReconstructor:
                 )
             output_node.name = node_name
             return output_node
+        elif op_name == "reshape":
+            # RESHAPE takes 2 inputs: input tensor and shape tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                shape_idx = operator.inputs[1]
+                if shape_idx in weights:
+                    shape_tensor = weights[shape_idx]
+                    shape_tuple = tuple(shape_tensor.tolist())
+                    output_node = self.graph.call_function(
+                        torch.reshape,
+                        args=(input_node, shape_tuple)
+                    )
+                else:
+                    # If shape is not available as constant, use -1 for unknown dimension
+                    output_node = self.graph.call_function(
+                        torch.reshape,
+                        args=(input_node, (-1,))
+                    )
+            else:
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "transpose":
+            # TRANSPOSE takes 2 inputs: input tensor and perm tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                perm_idx = operator.inputs[1]
+                if perm_idx in weights:
+                    perm_tensor = weights[perm_idx]
+                    perm_tuple = tuple(perm_tensor.tolist())
+                    output_node = self.graph.call_function(
+                        torch.permute,
+                        args=(input_node, perm_tuple)
+                    )
+                else:
+                    # If perm is not available, pass through
+                    output_node = self.graph.call_function(
+                        lambda x: x,
+                        args=(input_node,)
+                    )
+            else:
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "concatenation":
+            # CONCATENATION takes multiple input tensors
+            # The axis is in the params
+            axis = operator.builtin_options.get("axis", 0)
+            if len(input_nodes) > 0:
+                output_node = self.graph.call_function(
+                    torch.cat,
+                    args=(tuple(input_nodes),),
+                    kwargs={"dim": axis}
+                )
+            else:
+                output_node = self.graph.call_function(
+                    lambda *args: args[0] if args else None,
+                    args=()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "pad":
+            # PAD takes 2 inputs: input tensor and paddings tensor
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                paddings_idx = operator.inputs[1]
+                if paddings_idx in weights:
+                    paddings_tensor = weights[paddings_idx]
+                    # TFLite padding format: [[top, bottom], [left, right], ...]
+                    # PyTorch pad format: (left, right, top, bottom, ...)
+                    # Need to reverse and flatten
+                    paddings_np = paddings_tensor.numpy()
+                    # Reverse the order and flatten
+                    pad_list = []
+                    for i in range(len(paddings_np) - 1, -1, -1):
+                        pad_list.extend([int(paddings_np[i][0]), int(paddings_np[i][1])])
+                    output_node = self.graph.call_function(
+                        torch.nn.functional.pad,
+                        args=(input_node, tuple(pad_list))
+                    )
+                else:
+                    # If padding is not available, pass through
+                    output_node = self.graph.call_function(
+                        lambda x: x,
+                        args=(input_node,)
+                    )
+            else:
+                output_node = self.graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "pack":
+            # PACK takes multiple input tensors and stacks them
+            axis = operator.builtin_options.get("axis", 0)
+            if len(input_nodes) > 0:
+                output_node = self.graph.call_function(
+                    torch.stack,
+                    args=(tuple(input_nodes),),
+                    kwargs={"dim": axis}
+                )
+            else:
+                output_node = self.graph.call_function(
+                    lambda *args: args[0] if args else None,
+                    args=()
+                )
+            output_node.name = node_name
+            return output_node
         elif op_name == "cast":
             # CAST operator
             # For now, just pass through the input

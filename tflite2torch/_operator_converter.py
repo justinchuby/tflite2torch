@@ -374,27 +374,42 @@ class OperatorConverter:
         }
 
     def _convert_reshape(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite RESHAPE to PyTorch reshape."""
+        """Convert TFLite RESHAPE to PyTorch reshape.
+        
+        RESHAPE takes 2 inputs: input tensor and shape tensor.
+        The shape tensor needs to be converted to a tuple.
+        """
         return {
-            "module": torch.reshape,
+            "module": "reshape",
             "params": {},
+            "custom": True,
         }
 
     def _convert_concatenation(
         self, inputs: List[Any], options: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Convert TFLite CONCATENATION to PyTorch cat."""
+        """Convert TFLite CONCATENATION to PyTorch cat.
+        
+        CONCATENATION takes multiple input tensors and concatenates them.
+        The axis is specified in options.
+        """
         axis = options.get("axis", 0)
         return {
-            "module": torch.cat,
-            "params": {"dim": axis},
+            "module": "concatenation",
+            "params": {"axis": axis},
+            "custom": True,
         }
 
     def _convert_transpose(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite TRANSPOSE to PyTorch permute."""
+        """Convert TFLite TRANSPOSE to PyTorch permute.
+        
+        TRANSPOSE takes 2 inputs: input tensor and perm tensor.
+        The perm tensor needs to be converted to a tuple.
+        """
         return {
-            "module": torch.permute,
+            "module": "transpose",
             "params": {},
+            "custom": True,
         }
 
     def _convert_mean(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
@@ -406,10 +421,15 @@ class OperatorConverter:
         }
 
     def _convert_pad(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite PAD to PyTorch pad."""
+        """Convert TFLite PAD to PyTorch pad.
+        
+        PAD takes 2 inputs: input tensor and paddings tensor.
+        The paddings tensor needs to be converted to a tuple.
+        """
         return {
-            "module": torch.nn.functional.pad,
+            "module": "pad",
             "params": {},
+            "custom": True,
         }
 
     def _convert_squeeze(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
@@ -689,9 +709,13 @@ class OperatorConverter:
         return {"module": torch.nn.functional.pad, "params": {"mode": "reflect"}}
     
     def _convert_pack(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert TFLite PACK to PyTorch stack."""
+        """Convert TFLite PACK to PyTorch stack.
+        
+        PACK takes multiple input tensors and stacks them along a new dimension.
+        PyTorch stack expects tensors as a sequence (tuple/list).
+        """
         axis = options.get("axis", 0)
-        return {"module": torch.stack, "params": {"dim": axis}}
+        return {"module": "pack", "params": {"axis": axis}, "custom": True}
     
     def _convert_padv2(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite PADV2 to PyTorch pad."""
