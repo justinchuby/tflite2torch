@@ -131,7 +131,12 @@ class FXReconstructor:
         # Create FX node based on conversion info
         node_name = f"{op_type.lower()}_{op_idx}"
         
-        if isinstance(conv_info["module"], type) and issubclass(
+        # Handle custom operators that need special processing
+        if conv_info.get("custom", False) and isinstance(conv_info["module"], str):
+            output_node = self._handle_custom_operator(
+                conv_info["module"], input_nodes, operator, subgraph, weights, node_name
+            )
+        elif isinstance(conv_info["module"], type) and issubclass(
             conv_info["module"], nn.Module
         ):
             # It's a module class - create a module instance
@@ -235,6 +240,65 @@ class FXReconstructor:
         # Map output tensor indices to the output node
         for output_idx in operator.outputs:
             self.tensor_map[output_idx] = output_node
+    
+    def _handle_custom_operator(
+        self,
+        op_name: str,
+        input_nodes: List[Node],
+        operator: OperatorInfo,
+        subgraph: SubgraphInfo,
+        weights: Dict[int, torch.Tensor],
+        node_name: str,
+    ) -> Node:
+        """Handle custom operators that need special processing."""
+        if op_name == "rfft2d":
+            # RFFT2D takes 2 inputs: signal tensor and fft_length tensor
+            # We need to convert the fft_length from a tensor to a tuple
+            if len(input_nodes) >= 2:
+                signal_node = input_nodes[0]
+                # Get the fft_length tensor value
+                fft_length_idx = operator.inputs[1]
+                if fft_length_idx in weights:
+                    fft_length_tensor = weights[fft_length_idx]
+                    # Convert to tuple of ints
+                    fft_length = tuple(fft_length_tensor.tolist())
+                    # Create the rfft2 call with signal and s parameter
+                    output_node = self.graph.call_function(
+                        torch.fft.rfft2,
+                        args=(signal_node,),
+                        kwargs={"s": fft_length}
+                    )
+                else:
+                    # If fft_length is not available as a constant, call without s
+                    output_node = self.graph.call_function(
+                        torch.fft.rfft2,
+                        args=(signal_node,)
+                    )
+            else:
+                # Only signal input provided
+                output_node = self.graph.call_function(
+                    torch.fft.rfft2,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        elif op_name == "cast":
+            # CAST operator
+            # For now, just pass through the input
+            output_node = self.graph.call_function(
+                lambda x: x,
+                args=(input_nodes[0],) if input_nodes else ()
+            )
+            output_node.name = node_name
+            return output_node
+        else:
+            # Generic custom operator - create a lambda that passes through
+            output_node = self.graph.call_function(
+                lambda *args: args[0] if args else None,
+                args=tuple(input_nodes) if input_nodes else ()
+            )
+            output_node.name = node_name
+            return output_node
 
     def _create_root_module(self) -> nn.Module:
         """Create a module containing all parameters and sub-modules."""
@@ -243,7 +307,12 @@ class FXReconstructor:
             if isinstance(value, nn.Module):
                 root.add_module(name, value)
             elif isinstance(value, torch.Tensor):
-                root.register_parameter(name, nn.Parameter(value))
+                # Only register as parameter if it's a floating point or complex tensor
+                # Integer tensors should be registered as buffers instead
+                if value.dtype in (torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128):
+                    root.register_parameter(name, nn.Parameter(value))
+                else:
+                    root.register_buffer(name, value)
         return root
 
     def _sanitize_name(self, name: str) -> str:

@@ -174,6 +174,9 @@ class OperatorConverter:
         self.converters["MATRIX_DIAG"] = self._convert_matrix_diag
         self.converters["MATRIX_SET_DIAG"] = self._convert_matrix_set_diag
         self.converters["SEGMENT_SUM"] = self._convert_segment_sum
+        
+        # Signal Processing Operations
+        self.converters["RFFT2D"] = self._convert_rfft2d
 
     def convert(
         self, op_type: str, inputs: List[Any], options: Dict[str, Any]
@@ -888,6 +891,19 @@ class OperatorConverter:
     def _convert_segment_sum(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite SEGMENT_SUM to PyTorch segment operations."""
         return {"module": "segment_sum", "params": {}, "custom": True}
+    
+    # Signal Processing Operations
+    def _convert_rfft2d(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert TFLite RFFT2D to PyTorch fft.rfft2.
+        
+        RFFT2D takes 2 inputs:
+        - input tensor (signal)
+        - fft_length tensor (shape [2])
+        
+        The fft_length needs to be converted to a tuple for PyTorch.
+        """
+        return {"module": "rfft2d", "params": {}, "custom": True}
 
     def get_activation_module(self, activation: str) -> Optional[nn.Module]:
         """
