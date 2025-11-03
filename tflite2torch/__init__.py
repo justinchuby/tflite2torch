@@ -11,7 +11,7 @@ through a four-stage process:
 
 __version__ = "0.1.0"
 
-from .converter import convert_tflite_to_torch
+from .converter import convert_tflite_to_torch, TFLiteToTorchConverter
 from .parser import TFLiteParser
 from .operator_converter import OperatorConverter
 from .fx_reconstructor import FXReconstructor
@@ -19,6 +19,7 @@ from .code_renderer import CodeRenderer
 
 __all__ = [
     "convert_tflite_to_torch",
+    "TFLiteToTorchConverter",
     "TFLiteParser",
     "OperatorConverter",
     "FXReconstructor",
