@@ -64,7 +64,8 @@ class TestTFLiteToTorchConverter:
             f.write(b"TFL3" + b"\x00" * 100)
             temp_path = f.name
         
-        output_path = tempfile.mktemp(suffix=".py")
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as f:
+            output_path = f.name
         
         try:
             code = converter.convert_and_save(
@@ -138,7 +139,8 @@ class TestConvertTFLiteToTorch:
             f.write(b"TFL3" + b"\x00" * 100)
             temp_path = f.name
         
-        output_path = tempfile.mktemp(suffix=".py")
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as f:
+            output_path = f.name
         
         try:
             code = convert_tflite_to_torch(temp_path, output_path=output_path)
