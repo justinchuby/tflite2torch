@@ -653,56 +653,150 @@ class OperatorConverter:
             },
         }
 
-    def _convert_reshape(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_reshape(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite RESHAPE to PyTorch reshape.
         
         RESHAPE takes 2 inputs: input tensor and shape tensor.
         The shape tensor needs to be converted to a tuple.
         """
-        return {
-            "module": "reshape",
-            "params": {},
-            "custom": True,
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph for RESHAPE."""
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                shape_idx = operator.inputs[1]
+                if shape_idx in weights:
+                    shape_tensor = weights[shape_idx]
+                    shape_tuple = tuple(shape_tensor.tolist())
+                    output_node = graph.call_function(
+                        torch.reshape,
+                        args=(input_node, shape_tuple)
+                    )
+                else:
+                    # If shape is not available as constant, use -1 for unknown dimension
+                    output_node = graph.call_function(
+                        torch.reshape,
+                        args=(input_node, (-1,))
+                    )
+            else:
+                output_node = graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
     def _convert_concatenation(
         self, inputs: List[Any], options: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    ) -> Callable:
         """Convert TFLite CONCATENATION to PyTorch cat.
         
         CONCATENATION takes multiple input tensors and concatenates them.
         The axis is specified in options.
         """
         axis = options.get("axis", 0)
-        return {
-            "module": "concatenation",
-            "params": {"axis": axis},
-            "custom": True,
-        }
+        
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph for CONCATENATION."""
+            if len(input_nodes) > 0:
+                output_node = graph.call_function(
+                    torch.cat,
+                    args=(tuple(input_nodes),),
+                    kwargs={"dim": axis}
+                )
+            else:
+                output_node = graph.call_function(
+                    lambda *args: args[0] if args else None,
+                    args=()
+                )
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_transpose(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_transpose(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite TRANSPOSE to PyTorch permute.
         
         TRANSPOSE takes 2 inputs: input tensor and perm tensor.
         The perm tensor needs to be converted to a tuple.
         """
-        return {
-            "module": "transpose",
-            "params": {},
-            "custom": True,
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph for TRANSPOSE."""
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                perm_idx = operator.inputs[1]
+                if perm_idx in weights:
+                    perm_tensor = weights[perm_idx]
+                    perm_tuple = tuple(perm_tensor.tolist())
+                    output_node = graph.call_function(
+                        torch.permute,
+                        args=(input_node, perm_tuple)
+                    )
+                else:
+                    # If perm is not available, pass through
+                    output_node = graph.call_function(
+                        lambda x: x,
+                        args=(input_node,)
+                    )
+            else:
+                output_node = graph.call_function(
+                    lambda x: x,
+                    args=(input_nodes[0],) if input_nodes else ()
+                )
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
-    def _convert_mean(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_mean(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite MEAN to PyTorch mean.
         
         MEAN takes 2 inputs: input tensor and reduction_indices tensor.
         """
-        keep_dims = options.get("keep_dims", False)
-        return {
-            "module": "mean",
-            "params": {"keep_dims": keep_dims},
-            "custom": True,
-        }
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph for MEAN."""
+            if len(input_nodes) >= 2:
+                input_node = input_nodes[0]
+                axis_idx = operator.inputs[1]
+                keep_dims = operator.builtin_options.get("keep_dims", False)
+                
+                # Infer keep_dims from output shape if not in options
+                if not keep_dims and len(operator.outputs) > 0:
+                    input_idx = operator.inputs[0]
+                    output_idx = operator.outputs[0]
+                    if input_idx < len(subgraph.tensors) and output_idx < len(subgraph.tensors):
+                        input_shape = subgraph.tensors[input_idx].shape
+                        output_shape = subgraph.tensors[output_idx].shape
+                        if len(input_shape) == len(output_shape):
+                            keep_dims = True
+                
+                if axis_idx in weights:
+                    axis_tensor = weights[axis_idx]
+                    axis_list = axis_tensor.tolist()
+                    if isinstance(axis_list, list):
+                        axis = tuple(axis_list) if len(axis_list) > 1 else axis_list[0]
+                    else:
+                        axis = axis_list
+                    
+                    output_node = graph.call_function(
+                        torch.mean,
+                        args=(input_node,),
+                        kwargs={"dim": axis, "keepdim": keep_dims}
+                    )
+                else:
+                    # If axis is not available, reduce all dimensions
+                    output_node = graph.call_function(torch.mean, args=(input_node,))
+            else:
+                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],) if input_nodes else ())
+            output_node.name = node_name
+            return output_node
+        return build_graph
 
     def _convert_pad(self, inputs: List[Any], options: Dict[str, Any]) -> Dict[str, Any]:
         """Convert TFLite PAD to PyTorch pad.
