@@ -218,12 +218,18 @@ class FXReconstructor:
         
         return name or "unnamed"
 
-    def to_exported_program(self, graph_module: GraphModule) -> Optional[Any]:
+    def to_exported_program(
+        self,
+        graph_module: GraphModule,
+        example_inputs: Optional[tuple] = None
+    ) -> Optional[Any]:
         """
         Convert GraphModule to torch.export.ExportedProgram if available.
 
         Args:
             graph_module: FX GraphModule to export
+            example_inputs: Optional tuple of example input tensors.
+                          If not provided, creates dummy tensors (not recommended for production)
 
         Returns:
             ExportedProgram if torch.export is available, otherwise None
@@ -231,18 +237,21 @@ class FXReconstructor:
         try:
             # Try to use torch.export if available (PyTorch 2.0+)
             if hasattr(torch, "export"):
-                # Create example inputs based on placeholders
-                example_inputs = []
-                for node in graph_module.graph.nodes:
-                    if node.op == "placeholder":
-                        # Create a dummy input tensor
-                        # In production, this should use actual input shapes
-                        example_inputs.append(torch.randn(1, 3, 224, 224))
+                if example_inputs is None:
+                    # Create dummy inputs - this is just for demonstration
+                    # In production, actual input shapes should be provided
+                    example_inputs = []
+                    for node in graph_module.graph.nodes:
+                        if node.op == "placeholder":
+                            # Create a dummy input tensor with generic shape
+                            # TODO: Infer shape from model metadata
+                            example_inputs.append(torch.randn(1, 3, 224, 224))
+                    example_inputs = tuple(example_inputs)
                 
                 if example_inputs:
                     exported_program = torch.export.export(
                         graph_module,
-                        tuple(example_inputs)
+                        example_inputs
                     )
                     return exported_program
         except (AttributeError, Exception) as e:

@@ -228,8 +228,7 @@ class TFLiteParser:
             the official TFLite schema to parse the FlatBuffer format.
             For production use, consider using tflite.Model.GetRootAsModel()
         """
-        # For now, create a simple mock structure to demonstrate the architecture
-        # In a real implementation, this would parse the FlatBuffer format
+        # Read and validate the model file
         with open(model_path, "rb") as f:
             model_data = f.read()
 
@@ -237,8 +236,11 @@ class TFLiteParser:
         if len(model_data) < 4:
             raise ValueError("Invalid TFLite model file: too small")
 
-        # TFLite files should start with identifier
-        # For demonstration, create a simple example structure
+        # TODO: Parse actual TFLite FlatBuffer format using official schema
+        # For demonstration purposes, we create a mock structure
+        # In production, this would parse model_data using:
+        #   import tflite.Model
+        #   model = tflite.Model.Model.GetRootAsModel(model_data, 0)
         self._parse_mock_model()
 
         return self.subgraphs
