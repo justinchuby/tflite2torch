@@ -81,7 +81,11 @@ class TFLiteToTorchConverter:
         
         # Stage 2 & 3: Convert operators and reconstruct FX graph
         print("\nStage 2-3: Converting operators and reconstructing FX graph...")
-        graph_module = self.fx_reconstructor.reconstruct(subgraph)
+        # Get weights from parser
+        weights_dict = self.parser.get_weights(subgraph_index)
+        # Convert numpy arrays to torch tensors
+        weights_torch = {idx: torch.from_numpy(weight) for idx, weight in weights_dict.items()}
+        graph_module = self.fx_reconstructor.reconstruct(subgraph, weights=weights_torch)
         print("  Graph reconstruction complete")
         
         # Optionally visualize the graph

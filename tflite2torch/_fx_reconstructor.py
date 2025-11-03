@@ -138,6 +138,12 @@ class FXReconstructor:
             # Infer shape parameters from tensors if needed
             params = conv_info["params"].copy()
             
+            # Determine which inputs are data vs parameters
+            # For most modules: input[0] is data, input[1] is weight, input[2] is bias (optional)
+            data_input_count = 1
+            has_weights = False
+            has_bias = False
+            
             # For Conv2d, extract in_channels, out_channels, kernel_size from weight tensor
             if conv_info["module"] == nn.Conv2d and len(operator.inputs) >= 2:
                 weight_idx = operator.inputs[1]
@@ -147,6 +153,12 @@ class FXReconstructor:
                     params["out_channels"] = weight_tensor_info.shape[0]
                     params["kernel_size"] = (weight_tensor_info.shape[1], weight_tensor_info.shape[2])
                     params["in_channels"] = weight_tensor_info.shape[3]
+                    has_weights = True
+                    # Check if bias exists (input index -1 means no bias)
+                    if len(operator.inputs) >= 3 and operator.inputs[2] >= 0:
+                        has_bias = True
+                    else:
+                        params["bias"] = False
                     
             # For Linear, extract in_features, out_features from weight tensor
             elif conv_info["module"] == nn.Linear and len(operator.inputs) >= 2:
@@ -155,15 +167,45 @@ class FXReconstructor:
                 if len(weight_tensor_info.shape) == 2:
                     params["out_features"] = weight_tensor_info.shape[0]
                     params["in_features"] = weight_tensor_info.shape[1]
+                    has_weights = True
+                    # Check if bias exists (input index -1 means no bias)
+                    if len(operator.inputs) >= 3 and operator.inputs[2] >= 0:
+                        has_bias = True
+                    else:
+                        params["bias"] = False
             
             module = conv_info["module"](**params)
+            
+            # Load weights and bias into the module if they exist
+            if has_weights and len(operator.inputs) >= 2:
+                weight_idx = operator.inputs[1]
+                if weight_idx in weights:
+                    weight_tensor = weights[weight_idx]
+                    # For Conv2d, need to permute from TFLite format to PyTorch format
+                    if conv_info["module"] == nn.Conv2d:
+                        # TFLite: [out_channels, kernel_h, kernel_w, in_channels]
+                        # PyTorch: [out_channels, in_channels, kernel_h, kernel_w]
+                        weight_tensor = weight_tensor.permute(0, 3, 1, 2)
+                    module.weight.data = weight_tensor
+                elif weight_idx in self.tensor_map:
+                    # Weight is a parameter node already created
+                    pass
+                    
+            if has_bias and len(operator.inputs) >= 3:
+                bias_idx = operator.inputs[2]
+                if bias_idx >= 0 and bias_idx in weights:
+                    bias_tensor = weights[bias_idx]
+                    if module.bias is not None:
+                        module.bias.data = bias_tensor
+            
             module_name = f"module_{self.node_counter}"
             self.node_counter += 1
             self.parameter_dict[module_name] = module
             
+            # Only pass the data input (first input) to the module, not weights/bias
             output_node = self.graph.call_module(
                 module_name,
-                args=tuple(input_nodes)
+                args=(input_nodes[0],) if input_nodes else ()
             )
             output_node.name = node_name
         else:

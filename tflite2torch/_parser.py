@@ -217,6 +217,7 @@ class TFLiteParser:
         self.subgraphs: List[SubgraphInfo] = []
         self.model_description: str = ""
         self.version: int = 0
+        self.weights: Dict[int, Dict[int, np.ndarray]] = {}  # subgraph_idx -> tensor_idx -> weights
 
     def parse(self, model_path: str) -> List[SubgraphInfo]:
         """
@@ -240,6 +241,18 @@ class TFLiteParser:
         self._parse_tflite_model(model_data)
 
         return self.subgraphs
+    
+    def get_weights(self, subgraph_idx: int = 0) -> Dict[int, np.ndarray]:
+        """
+        Get weights for a specific subgraph.
+        
+        Args:
+            subgraph_idx: Index of the subgraph
+            
+        Returns:
+            Dictionary mapping tensor index to weight tensor (as numpy array)
+        """
+        return self.weights.get(subgraph_idx, {})
 
     def _parse_tflite_model(self, model_data: bytes):
         """
@@ -258,9 +271,12 @@ class TFLiteParser:
         
         # Parse all subgraphs
         self.subgraphs = []
+        self.weights = {}
         for subgraph_idx in range(model.SubgraphsLength()):
             subgraph = model.Subgraphs(subgraph_idx)
             self.subgraphs.append(self._parse_subgraph(subgraph, model))
+            # Extract weights for this subgraph
+            self.weights[subgraph_idx] = self._extract_weights(subgraph, model)
     
     def _parse_subgraph(self, subgraph, model) -> SubgraphInfo:
         """
@@ -484,3 +500,64 @@ class TFLiteParser:
 
         subgraph = self.subgraphs[subgraph_idx]
         return [subgraph.tensors[idx] for idx in subgraph.outputs]
+    
+    def _extract_weights(self, subgraph, model) -> Dict[int, np.ndarray]:
+        """
+        Extract weight tensors from the model buffers.
+        
+        Args:
+            subgraph: TFLite subgraph object
+            model: TFLite model object
+            
+        Returns:
+            Dictionary mapping tensor index to weight data as numpy array
+        """
+        weights = {}
+        
+        for tensor_idx in range(subgraph.TensorsLength()):
+            tensor = subgraph.Tensors(tensor_idx)
+            buffer_idx = tensor.Buffer()
+            
+            # Skip if buffer is 0 (no data) or tensor is an input/output
+            if buffer_idx == 0:
+                continue
+            
+            # Get the buffer
+            buffer = model.Buffers(buffer_idx)
+            if buffer is None or buffer.DataLength() == 0:
+                continue
+            
+            # Extract data from buffer
+            data = buffer.DataAsNumpy()
+            
+            # Get tensor properties
+            shape = [tensor.Shape(i) for i in range(tensor.ShapeLength())]
+            dtype_code = tensor.Type()
+            
+            # Map TFLite dtype to numpy dtype
+            dtype_map = {
+                0: np.float32,
+                1: np.float16,
+                2: np.int32,
+                3: np.uint8,
+                4: np.int64,
+                6: np.bool_,
+                7: np.int16,
+                8: np.complex64,
+                9: np.int8,
+                10: np.float64,
+                11: np.complex128,
+            }
+            
+            numpy_dtype = dtype_map.get(dtype_code, np.float32)
+            
+            # Reshape data to tensor shape
+            try:
+                weight_tensor = np.frombuffer(data, dtype=numpy_dtype).reshape(shape)
+                weights[tensor_idx] = weight_tensor.copy()
+            except Exception as e:
+                # Skip tensors that can't be reshaped
+                print(f"Warning: Could not extract weight for tensor {tensor_idx}: {e}")
+                continue
+        
+        return weights
