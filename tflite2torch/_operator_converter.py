@@ -1278,11 +1278,11 @@ class OperatorConverter:
             if len(operator.inputs) >= 2:
                 weight_idx = operator.inputs[1]
                 weight_tensor_info = subgraph.tensors[weight_idx]
-                # TFLite weight format: [out_channels, kernel_d, kernel_h, kernel_w, in_channels]
+                # TFLite weight format: [kernel_d, kernel_h, kernel_w, in_channels, out_channels]
                 if len(weight_tensor_info.shape) == 5:
-                    out_channels = weight_tensor_info.shape[0]
-                    kernel_size = (weight_tensor_info.shape[1], weight_tensor_info.shape[2], weight_tensor_info.shape[3])
-                    in_channels = weight_tensor_info.shape[4]
+                    kernel_size = (weight_tensor_info.shape[0], weight_tensor_info.shape[1], weight_tensor_info.shape[2])
+                    in_channels = weight_tensor_info.shape[3]
+                    out_channels = weight_tensor_info.shape[4]
                     
                     # Check if bias exists
                     has_bias = len(operator.inputs) >= 3 and operator.inputs[2] >= 0
@@ -1309,9 +1309,9 @@ class OperatorConverter:
                     if weight_idx in weights:
                         weight_tensor = weights[weight_idx]
                         # Convert from TFLite format to PyTorch format
-                        # TFLite: [out_channels, kernel_d, kernel_h, kernel_w, in_channels]
+                        # TFLite: [kernel_d, kernel_h, kernel_w, in_channels, out_channels]
                         # PyTorch: [out_channels, in_channels, kernel_d, kernel_h, kernel_w]
-                        weight_tensor = weight_tensor.permute(0, 4, 1, 2, 3)
+                        weight_tensor = weight_tensor.permute(4, 3, 0, 1, 2)
                         module.weight.data = weight_tensor
                     
                     # Load bias if it exists
@@ -1878,7 +1878,8 @@ class OperatorConverter:
         """Convert TFLite MIRROR_PAD to PyTorch pad with reflect mode.
         
         PyTorch pad requires pad to be a tuple of ints, not a tensor.
-        We need to convert the padding tensor to a tuple at runtime.
+        TFLite format: [[pad_before_dim_0, pad_after_dim_0], [pad_before_dim_1, pad_after_dim_1], ...]
+        PyTorch format: (left, right, top, bottom, front, back, ...) - reversed and flattened
         """
         mode = options.get("mode", "REFLECT")
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
@@ -1888,14 +1889,24 @@ class OperatorConverter:
             input_tensor = input_nodes[0]
             pad_tensor = input_nodes[1]
             
-            # Convert pad tensor to tuple - flatten and convert to list
-            # TFLite pad format is [[pad_before_dim_n, pad_after_dim_n], ...] 
-            # PyTorch pad format is (left, right, top, bottom, front, back)
-            flatten_node = graph.call_method("flatten", args=(pad_tensor,))
-            tolist_node = graph.call_method("tolist", args=(flatten_node,))
-            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            # Custom pad conversion: TFLite to PyTorch format
+            def convert_pad_tflite_to_torch(input_tensor, pad_tensor):
+                # pad_tensor shape: [ndim, 2]
+                # Convert to PyTorch format: reverse dimension order and flatten
+                # PyTorch pads from last dimension to first
+                pad_list = []
+                ndim = pad_tensor.shape[0]
+                for i in range(ndim - 1, -1, -1):
+                    pad_list.extend([pad_tensor[i, 0].item(), pad_tensor[i, 1].item()])
+                
+                # PyTorch pad only supports padding last 2 or 3 dimensions for 4D input
+                # Skip leading zero paddings
+                while len(pad_list) > 0 and pad_list[-2] == 0 and pad_list[-1] == 0:
+                    pad_list = pad_list[:-2]
+                
+                return torch.nn.functional.pad(input_tensor, tuple(pad_list), mode='reflect')
             
-            output_node = graph.call_function(torch.nn.functional.pad, args=(input_tensor, tuple_node), kwargs={"mode": "reflect"})
+            output_node = graph.call_function(convert_pad_tflite_to_torch, args=(input_tensor, pad_tensor))
             output_node.name = node_name
             return output_node
         return build_graph
