@@ -29,14 +29,14 @@ def run_tflite_model(tflite_model, input_data):
     # Set input
     if isinstance(input_data, (list, tuple)):
         for i, data in enumerate(input_data):
-            # Preserve dtype for bool, otherwise use float32
-            if data.dtype == bool:
+            # Preserve dtype for bool and int types
+            if data.dtype in [bool, np.int32, np.int64, np.int8, np.int16]:
                 interpreter.set_tensor(input_details[i]['index'], data)
             else:
                 interpreter.set_tensor(input_details[i]['index'], data.astype(np.float32))
     else:
-        # Preserve dtype for bool, otherwise use float32
-        if input_data.dtype == bool:
+        # Preserve dtype for bool and int types
+        if input_data.dtype in [bool, np.int32, np.int64, np.int8, np.int16]:
             interpreter.set_tensor(input_details[0]['index'], input_data)
         else:
             interpreter.set_tensor(input_details[0]['index'], input_data.astype(np.float32))
@@ -143,23 +143,111 @@ class TestAllTFLiteOperators:
 
     def test_conv_2d_operator(self, tmp_path):
         """Test CONV_2D operator (OP 3)."""
-        pytest.skip("CONV_2D requires complex setup - TODO")
+        input_layer = tf.keras.layers.Input(shape=(8, 8, 3))
+        output = tf.keras.layers.Conv2D(filters=16, kernel_size=3, padding='same')(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "conv_2d_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 8, 8, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="CONV_2D", rtol=1e-3, atol=1e-3)
 
     def test_depthwise_conv_2d_operator(self, tmp_path):
         """Test DEPTHWISE_CONV_2D operator (OP 4)."""
-        pytest.skip("DEPTHWISE_CONV_2D requires complex setup - TODO")
+        input_layer = tf.keras.layers.Input(shape=(8, 8, 3))
+        output = tf.keras.layers.DepthwiseConv2D(kernel_size=3, padding='same')(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "depthwise_conv_2d_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 8, 8, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="DEPTHWISE_CONV_2D", rtol=1e-3, atol=1e-3)
 
     def test_depth_to_space_operator(self, tmp_path):
         """Test DEPTH_TO_SPACE operator (OP 5)."""
-        pytest.skip("DEPTH_TO_SPACE requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 2, 2, 4], dtype=tf.float32)])
+        def depth_to_space_func(x):
+            return tf.nn.depth_to_space(x, block_size=2)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([depth_to_space_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "depth_to_space_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 2, 2, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="DEPTH_TO_SPACE")
 
     def test_dequantize_operator(self, tmp_path):
         """Test DEQUANTIZE operator (OP 6)."""
-        pytest.skip("DEQUANTIZE requires complex setup - TODO")
+        # Create a simple quantized model
+        input_layer = tf.keras.layers.Input(shape=(5,), dtype=tf.float32)
+        # Quantize then dequantize
+        quant = tf.quantization.fake_quant_with_min_max_args(input_layer, min=-6.0, max=6.0)
+        model = tf.keras.Model(inputs=input_layer, outputs=quant)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "dequantize_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="DEQUANTIZE", rtol=1e-2, atol=1e-2)
 
     def test_embedding_lookup_operator(self, tmp_path):
         """Test EMBEDDING_LOOKUP operator (OP 7)."""
-        pytest.skip("EMBEDDING_LOOKUP requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[3], dtype=tf.int32)])
+        def embedding_lookup_func(ids):
+            embedding_table = tf.constant([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]], dtype=tf.float32)
+            return tf.nn.embedding_lookup(embedding_table, ids)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([embedding_lookup_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "embedding_lookup_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        ids_data = np.array([0, 2, 3], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, ids_data)
+        torch_output = graph_module(torch.from_numpy(ids_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="EMBEDDING_LOOKUP")
 
     def test_floor_operator(self, tmp_path):
         """Test FLOOR operator (OP 8)."""
@@ -184,7 +272,24 @@ class TestAllTFLiteOperators:
 
     def test_fully_connected_operator(self, tmp_path):
         """Test FULLY_CONNECTED operator (OP 9)."""
-        pytest.skip("FULLY_CONNECTED requires complex setup - TODO")
+        input_layer = tf.keras.layers.Input(shape=(10,))
+        output = tf.keras.layers.Dense(5)(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "fully_connected_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 10).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="FULLY_CONNECTED", rtol=1e-3, atol=1e-3)
 
     def test_hashtable_lookup_operator(self, tmp_path):
         """Test HASHTABLE_LOOKUP operator (OP 10)."""
@@ -192,7 +297,24 @@ class TestAllTFLiteOperators:
 
     def test_l2_normalization_operator(self, tmp_path):
         """Test L2_NORMALIZATION operator (OP 11)."""
-        pytest.skip("L2_NORMALIZATION requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def l2_norm_func(x):
+            return tf.nn.l2_normalize(x, axis=1)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([l2_norm_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "l2_normalization_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[3.0, 4.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="L2_NORMALIZATION")
 
     def test_l2_pool_2d_operator(self, tmp_path):
         """Test L2_POOL_2D operator (OP 12)."""
@@ -200,7 +322,24 @@ class TestAllTFLiteOperators:
 
     def test_local_response_normalization_operator(self, tmp_path):
         """Test LOCAL_RESPONSE_NORMALIZATION operator (OP 13)."""
-        pytest.skip("LOCAL_RESPONSE_NORMALIZATION requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4, 8], dtype=tf.float32)])
+        def lrn_func(x):
+            return tf.nn.local_response_normalization(x, depth_radius=2, bias=1.0, alpha=1.0, beta=0.5)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([lrn_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "local_response_normalization_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 8).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="LOCAL_RESPONSE_NORMALIZATION", rtol=1e-3, atol=1e-3)
 
     def test_logistic_operator(self, tmp_path):
         """Test LOGISTIC operator (OP 14)."""
@@ -345,7 +484,24 @@ class TestAllTFLiteOperators:
 
     def test_resize_bilinear_operator(self, tmp_path):
         """Test RESIZE_BILINEAR operator (OP 23)."""
-        pytest.skip("RESIZE_BILINEAR requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4, 3], dtype=tf.float32)])
+        def resize_bilinear_func(x):
+            return tf.image.resize(x, [8, 8], method='bilinear')
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([resize_bilinear_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "resize_bilinear_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="RESIZE_BILINEAR", rtol=1e-3, atol=1e-3)
 
     def test_rnn_operator(self, tmp_path):
         """Test RNN operator (OP 24)."""
@@ -374,7 +530,24 @@ class TestAllTFLiteOperators:
 
     def test_space_to_depth_operator(self, tmp_path):
         """Test SPACE_TO_DEPTH operator (OP 26)."""
-        pytest.skip("SPACE_TO_DEPTH requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4, 1], dtype=tf.float32)])
+        def space_to_depth_func(x):
+            return tf.nn.space_to_depth(x, block_size=2)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([space_to_depth_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "space_to_depth_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 1).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SPACE_TO_DEPTH")
 
     def test_svdf_operator(self, tmp_path):
         """Test SVDF operator (OP 27)."""
@@ -449,15 +622,70 @@ class TestAllTFLiteOperators:
 
     def test_gather_operator(self, tmp_path):
         """Test GATHER operator (OP 36)."""
-        pytest.skip("GATHER requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[5, 3], dtype=tf.float32),
+            tf.TensorSpec(shape=[2], dtype=tf.int32)
+        ])
+        def gather_func(params, indices):
+            return tf.gather(params, indices, axis=0)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([gather_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "gather_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        params_data = np.random.randn(5, 3).astype(np.float32)
+        indices_data = np.array([1, 3], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, [params_data, indices_data])
+        torch_output = graph_module(torch.from_numpy(params_data), torch.from_numpy(indices_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="GATHER")
 
     def test_batch_to_space_nd_operator(self, tmp_path):
         """Test BATCH_TO_SPACE_ND operator (OP 37)."""
-        pytest.skip("BATCH_TO_SPACE_ND requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[4, 2, 2, 1], dtype=tf.float32)])
+        def batch_to_space_func(x):
+            return tf.batch_to_space(x, block_shape=[2, 2], crops=[[0, 0], [0, 0]])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([batch_to_space_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "batch_to_space_nd_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(4, 2, 2, 1).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="BATCH_TO_SPACE_ND")
 
     def test_space_to_batch_nd_operator(self, tmp_path):
         """Test SPACE_TO_BATCH_ND operator (OP 38)."""
-        pytest.skip("SPACE_TO_BATCH_ND requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4, 1], dtype=tf.float32)])
+        def space_to_batch_func(x):
+            return tf.space_to_batch(x, block_shape=[2, 2], paddings=[[0, 0], [0, 0]])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([space_to_batch_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "space_to_batch_nd_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 1).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SPACE_TO_BATCH_ND")
 
     def test_transpose_operator(self, tmp_path):
         """Test TRANSPOSE operator (OP 39)."""
@@ -574,7 +802,24 @@ class TestAllTFLiteOperators:
 
     def test_strided_slice_operator(self, tmp_path):
         """Test STRIDED_SLICE operator (OP 45)."""
-        pytest.skip("STRIDED_SLICE requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[3, 4, 5], dtype=tf.float32)])
+        def strided_slice_func(x):
+            return tf.strided_slice(x, [0, 0, 0], [2, 3, 4], [1, 1, 1])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([strided_slice_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "strided_slice_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(3, 4, 5).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="STRIDED_SLICE")
 
     def test_bidirectional_sequence_rnn_operator(self, tmp_path):
         """Test BIDIRECTIONAL_SEQUENCE_RNN operator (OP 46)."""
@@ -603,7 +848,25 @@ class TestAllTFLiteOperators:
 
     def test_topk_v2_operator(self, tmp_path):
         """Test TOPK_V2 operator (OP 48)."""
-        pytest.skip("TOPK_V2 requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def topk_func(x):
+            values, indices = tf.nn.top_k(x, k=3)
+            return values  # Only return values to match the test structure
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([topk_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "topk_v2_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 5.0, 3.0, 2.0, 4.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="TOPK_V2")
 
     def test_split_operator(self, tmp_path):
         """Test SPLIT operator (OP 49)."""
@@ -681,7 +944,25 @@ class TestAllTFLiteOperators:
 
     def test_prelu_operator(self, tmp_path):
         """Test PRELU operator (OP 54)."""
-        pytest.skip("PRELU requires complex setup - TODO")
+        # Create a simple PReLU test using Keras
+        input_layer = tf.keras.layers.Input(shape=(5,))
+        output = tf.keras.layers.PReLU()(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "prelu_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[-2.0, -1.0, 0.0, 1.0, 2.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="PRELU", rtol=1e-3, atol=1e-3)
 
     def test_maximum_operator(self, tmp_path):
         """Test MAXIMUM operator (OP 55)."""
@@ -802,7 +1083,25 @@ class TestAllTFLiteOperators:
 
     def test_padv2_operator(self, tmp_path):
         """Test PADV2 operator (OP 60)."""
-        pytest.skip("PADV2 requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3, 3], dtype=tf.float32)])
+        def padv2_func(x):
+            paddings = tf.constant([[0, 0], [1, 1], [1, 1]])
+            return tf.pad(x, paddings, mode='CONSTANT', constant_values=0)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([padv2_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "padv2_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 3, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="PADV2")
 
     def test_greater_operator(self, tmp_path):
         """Test GREATER operator (OP 61)."""
@@ -881,7 +1180,30 @@ class TestAllTFLiteOperators:
 
     def test_select_operator(self, tmp_path):
         """Test SELECT operator (OP 64)."""
-        pytest.skip("SELECT requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[1, 5], dtype=tf.bool),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32)
+        ])
+        def select_func(condition, x, y):
+            return tf.where(condition, x, y)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([select_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "select_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        condition_data = np.array([[True, False, True, False, True]], dtype=bool)
+        x_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        y_data = np.array([[10.0, 20.0, 30.0, 40.0, 50.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [condition_data, x_data, y_data])
+        torch_output = graph_module(torch.from_numpy(condition_data), torch.from_numpy(x_data), torch.from_numpy(y_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SELECT")
 
     def test_slice_operator(self, tmp_path):
         """Test SLICE operator (OP 65)."""
@@ -927,11 +1249,50 @@ class TestAllTFLiteOperators:
 
     def test_transpose_conv_operator(self, tmp_path):
         """Test TRANSPOSE_CONV operator (OP 67)."""
-        pytest.skip("TRANSPOSE_CONV requires complex setup - TODO")
+        # Create a model with Conv2DTranspose
+        input_layer = tf.keras.layers.Input(shape=(4, 4, 3))
+        output = tf.keras.layers.Conv2DTranspose(filters=16, kernel_size=3, strides=2, padding='same')(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "transpose_conv_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="TRANSPOSE_CONV", rtol=1e-3, atol=1e-3)
 
     def test_sparse_to_dense_operator(self, tmp_path):
         """Test SPARSE_TO_DENSE operator (OP 68)."""
-        pytest.skip("SPARSE_TO_DENSE requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[3], dtype=tf.int32),
+            tf.TensorSpec(shape=[3], dtype=tf.float32)
+        ])
+        def sparse_to_dense_func(indices, values):
+            return tf.scatter_nd(tf.expand_dims(indices, 1), values, [10])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([sparse_to_dense_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "sparse_to_dense_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        indices_data = np.array([0, 2, 5], dtype=np.int32)
+        values_data = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [indices_data, values_data])
+        torch_output = graph_module(torch.from_numpy(indices_data), torch.from_numpy(values_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SPARSE_TO_DENSE")
 
     def test_tile_operator(self, tmp_path):
         """Test TILE operator (OP 69)."""
@@ -1157,11 +1518,45 @@ class TestAllTFLiteOperators:
 
     def test_arg_min_operator(self, tmp_path):
         """Test ARG_MIN operator (OP 79)."""
-        pytest.skip("ARG_MIN requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def arg_min_func(x):
+            return tf.argmin(x, axis=1)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([arg_min_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "arg_min_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[5.0, 2.0, 8.0, 1.0, 9.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="ARG_MIN")
 
     def test_fake_quant_operator(self, tmp_path):
         """Test FAKE_QUANT operator (OP 80)."""
-        pytest.skip("FAKE_QUANT requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def fake_quant_func(x):
+            return tf.quantization.fake_quant_with_min_max_args(x, min=-6.0, max=6.0)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([fake_quant_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "fake_quant_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[-8.0, -4.0, 0.0, 4.0, 8.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="FAKE_QUANT", rtol=1e-2, atol=1e-2)
 
     def test_reduce_prod_operator(self, tmp_path):
         """Test REDUCE_PROD operator (OP 81)."""
@@ -1255,7 +1650,24 @@ class TestAllTFLiteOperators:
 
     def test_one_hot_operator(self, tmp_path):
         """Test ONE_HOT operator (OP 85)."""
-        pytest.skip("ONE_HOT requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[3], dtype=tf.int32)])
+        def one_hot_func(indices):
+            return tf.one_hot(indices, depth=5)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([one_hot_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "one_hot_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([0, 2, 4], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="ONE_HOT")
 
     def test_logical_and_operator(self, tmp_path):
         """Test LOGICAL_AND operator (OP 86)."""
@@ -1305,7 +1717,24 @@ class TestAllTFLiteOperators:
 
     def test_unpack_operator(self, tmp_path):
         """Test UNPACK operator (OP 88)."""
-        pytest.skip("UNPACK requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[3, 4], dtype=tf.float32)])
+        def unpack_func(x):
+            return tf.unstack(x, axis=0)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([unpack_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "unpack_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(3, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="UNPACK")
 
     def test_reduce_min_operator(self, tmp_path):
         """Test REDUCE_MIN operator (OP 89)."""
@@ -1483,7 +1912,24 @@ class TestAllTFLiteOperators:
 
     def test_resize_nearest_neighbor_operator(self, tmp_path):
         """Test RESIZE_NEAREST_NEIGHBOR operator (OP 97)."""
-        pytest.skip("RESIZE_NEAREST_NEIGHBOR requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4, 3], dtype=tf.float32)])
+        def resize_nearest_func(x):
+            return tf.image.resize(x, [8, 8], method='nearest')
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([resize_nearest_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "resize_nearest_neighbor_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="RESIZE_NEAREST_NEIGHBOR")
 
     def test_leaky_relu_operator(self, tmp_path):
         """Test LEAKY_RELU operator (OP 98)."""
@@ -1533,7 +1979,25 @@ class TestAllTFLiteOperators:
 
     def test_mirror_pad_operator(self, tmp_path):
         """Test MIRROR_PAD operator (OP 100)."""
-        pytest.skip("MIRROR_PAD requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3, 3, 1], dtype=tf.float32)])
+        def mirror_pad_func(x):
+            paddings = tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]])
+            return tf.pad(x, paddings, mode='REFLECT')
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([mirror_pad_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "mirror_pad_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 3, 3, 1).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="MIRROR_PAD")
 
     def test_abs_operator(self, tmp_path):
         """Test ABS operator (OP 101)."""
@@ -1558,11 +2022,49 @@ class TestAllTFLiteOperators:
 
     def test_split_v_operator(self, tmp_path):
         """Test SPLIT_V operator (OP 102)."""
-        pytest.skip("SPLIT_V requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 9], dtype=tf.float32)])
+        def split_v_func(x):
+            # Split into 3 parts with sizes [2, 3, 4]
+            splits = tf.split(x, [2, 3, 4], axis=1)
+            return splits[0]  # Return first split for testing
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([split_v_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "split_v_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 9).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SPLIT_V")
 
     def test_unique_operator(self, tmp_path):
         """Test UNIQUE operator (OP 103)."""
-        pytest.skip("UNIQUE requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[6], dtype=tf.int32)])
+        def unique_func(x):
+            y, idx = tf.unique(x)
+            return y  # Return unique values
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([unique_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "unique_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([1, 2, 3, 2, 1, 4], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        # Note: unique may return results in different order, so we sort for comparison
+        assert compare_outputs(np.sort(tflite_output), np.sort(torch_output.numpy() if isinstance(torch_output, torch.Tensor) else torch_output), op_name="UNIQUE")
 
     def test_ceil_operator(self, tmp_path):
         """Test CEIL operator (OP 104)."""
@@ -1588,15 +2090,76 @@ class TestAllTFLiteOperators:
 
     def test_reverse_v2_operator(self, tmp_path):
         """Test REVERSE_V2 operator (OP 105)."""
-        pytest.skip("REVERSE_V2 requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def reverse_func(x):
+            return tf.reverse(x, axis=[1])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([reverse_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "reverse_v2_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="REVERSE_V2")
 
     def test_add_n_operator(self, tmp_path):
         """Test ADD_N operator (OP 106)."""
-        pytest.skip("ADD_N requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32)
+        ])
+        def add_n_func(x, y, z):
+            return tf.add_n([x, y, z])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([add_n_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "add_n_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input1 = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        input2 = np.array([[0.5, 1.5, 2.5, 3.5, 4.5]], dtype=np.float32)
+        input3 = np.array([[0.1, 0.2, 0.3, 0.4, 0.5]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [input1, input2, input3])
+        torch_output = graph_module(torch.from_numpy(input1), torch.from_numpy(input2), torch.from_numpy(input3))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="ADD_N")
 
     def test_gather_nd_operator(self, tmp_path):
         """Test GATHER_ND operator (OP 107)."""
-        pytest.skip("GATHER_ND requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[3, 3], dtype=tf.float32),
+            tf.TensorSpec(shape=[2, 2], dtype=tf.int32)
+        ])
+        def gather_nd_func(params, indices):
+            return tf.gather_nd(params, indices)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([gather_nd_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "gather_nd_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        params_data = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=np.float32)
+        indices_data = np.array([[0, 0], [1, 2]], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, [params_data, indices_data])
+        torch_output = graph_module(torch.from_numpy(params_data), torch.from_numpy(indices_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="GATHER_ND")
 
     def test_cos_operator(self, tmp_path):
         """Test COS operator (OP 108)."""
@@ -1621,7 +2184,30 @@ class TestAllTFLiteOperators:
 
     def test_where_operator(self, tmp_path):
         """Test WHERE operator (OP 109)."""
-        pytest.skip("WHERE requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[1, 5], dtype=tf.bool),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32)
+        ])
+        def where_func(condition, x, y):
+            return tf.where(condition, x, y)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([where_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "where_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        condition_data = np.array([[True, False, True, False, True]], dtype=bool)
+        x_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        y_data = np.array([[10.0, 20.0, 30.0, 40.0, 50.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [condition_data, x_data, y_data])
+        torch_output = graph_module(torch.from_numpy(condition_data), torch.from_numpy(x_data), torch.from_numpy(y_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="WHERE")
 
     def test_rank_operator(self, tmp_path):
         """Test RANK operator (OP 110)."""
@@ -1650,19 +2236,96 @@ class TestAllTFLiteOperators:
 
     def test_reverse_sequence_operator(self, tmp_path):
         """Test REVERSE_SEQUENCE operator (OP 112)."""
-        pytest.skip("REVERSE_SEQUENCE requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[3, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[3], dtype=tf.int32)
+        ])
+        def reverse_sequence_func(x, seq_lengths):
+            return tf.reverse_sequence(x, seq_lengths, seq_axis=1, batch_axis=0)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([reverse_sequence_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "reverse_sequence_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        x_data = np.array([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]], dtype=np.float32)
+        seq_lengths_data = np.array([2, 3, 4], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, [x_data, seq_lengths_data])
+        torch_output = graph_module(torch.from_numpy(x_data), torch.from_numpy(seq_lengths_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="REVERSE_SEQUENCE")
 
     def test_matrix_diag_operator(self, tmp_path):
         """Test MATRIX_DIAG operator (OP 113)."""
-        pytest.skip("MATRIX_DIAG requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[4], dtype=tf.float32)])
+        def matrix_diag_func(diagonal):
+            return tf.linalg.diag(diagonal)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([matrix_diag_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "matrix_diag_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        diagonal_data = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, diagonal_data)
+        torch_output = graph_module(torch.from_numpy(diagonal_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="MATRIX_DIAG")
 
     def test_quantize_operator(self, tmp_path):
         """Test QUANTIZE operator (OP 114)."""
-        pytest.skip("QUANTIZE requires complex setup - TODO")
+        # Create a simple model with quantization
+        input_layer = tf.keras.layers.Input(shape=(5,), dtype=tf.float32)
+        quant = tf.quantization.fake_quant_with_min_max_args(input_layer, min=0.0, max=6.0)
+        model = tf.keras.Model(inputs=input_layer, outputs=quant)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "quantize_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="QUANTIZE", rtol=1e-2, atol=1e-2)
 
     def test_matrix_set_diag_operator(self, tmp_path):
         """Test MATRIX_SET_DIAG operator (OP 115)."""
-        pytest.skip("MATRIX_SET_DIAG requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[4, 4], dtype=tf.float32),
+            tf.TensorSpec(shape=[4], dtype=tf.float32)
+        ])
+        def matrix_set_diag_func(matrix, diagonal):
+            return tf.linalg.set_diag(matrix, diagonal)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([matrix_set_diag_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "matrix_set_diag_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        matrix_data = np.ones((4, 4), dtype=np.float32)
+        diagonal_data = np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [matrix_data, diagonal_data])
+        torch_output = graph_module(torch.from_numpy(matrix_data), torch.from_numpy(diagonal_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="MATRIX_SET_DIAG")
 
     def test_round_operator(self, tmp_path):
         """Test ROUND operator (OP 116)."""
@@ -1670,7 +2333,24 @@ class TestAllTFLiteOperators:
 
     def test_hard_swish_operator(self, tmp_path):
         """Test HARD_SWISH operator (OP 117)."""
-        pytest.skip("HARD_SWISH requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def hard_swish_func(x):
+            return x * tf.nn.relu6(x + 3.0) / 6.0
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([hard_swish_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "hard_swish_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[-3.0, -1.0, 0.0, 1.0, 3.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="HARD_SWISH")
 
     def test_if_operator(self, tmp_path):
         """Test IF operator (OP 118)."""
@@ -1690,11 +2370,55 @@ class TestAllTFLiteOperators:
 
     def test_scatter_nd_operator(self, tmp_path):
         """Test SCATTER_ND operator (OP 122)."""
-        pytest.skip("SCATTER_ND requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[3, 2], dtype=tf.int32),
+            tf.TensorSpec(shape=[3], dtype=tf.float32)
+        ])
+        def scatter_nd_func(indices, updates):
+            return tf.scatter_nd(indices, updates, [4, 4])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([scatter_nd_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "scatter_nd_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        indices_data = np.array([[0, 0], [1, 1], [2, 2]], dtype=np.int32)
+        updates_data = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [indices_data, updates_data])
+        torch_output = graph_module(torch.from_numpy(indices_data), torch.from_numpy(updates_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SCATTER_ND")
 
     def test_select_v2_operator(self, tmp_path):
         """Test SELECT_V2 operator (OP 123)."""
-        pytest.skip("SELECT_V2 requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[1, 5], dtype=tf.bool),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32)
+        ])
+        def select_v2_func(condition, x, y):
+            return tf.where(condition, x, y)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([select_v2_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "select_v2_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        condition_data = np.array([[True, False, True, False, True]], dtype=bool)
+        x_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        y_data = np.array([[10.0, 20.0, 30.0, 40.0, 50.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [condition_data, x_data, y_data])
+        torch_output = graph_module(torch.from_numpy(condition_data), torch.from_numpy(x_data), torch.from_numpy(y_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SELECT_V2")
 
     def test_densify_operator(self, tmp_path):
         """Test DENSIFY operator (OP 124)."""
@@ -1702,11 +2426,53 @@ class TestAllTFLiteOperators:
 
     def test_segment_sum_operator(self, tmp_path):
         """Test SEGMENT_SUM operator (OP 125)."""
-        pytest.skip("SEGMENT_SUM requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[6], dtype=tf.float32),
+            tf.TensorSpec(shape=[6], dtype=tf.int32)
+        ])
+        def segment_sum_func(data, segment_ids):
+            return tf.math.segment_sum(data, segment_ids)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([segment_sum_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "segment_sum_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        data = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=np.float32)
+        segment_ids = np.array([0, 0, 1, 1, 2, 2], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, [data, segment_ids])
+        torch_output = graph_module(torch.from_numpy(data), torch.from_numpy(segment_ids))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SEGMENT_SUM")
 
     def test_batch_matmul_operator(self, tmp_path):
         """Test BATCH_MATMUL operator (OP 126)."""
-        pytest.skip("BATCH_MATMUL requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[2, 3, 4], dtype=tf.float32),
+            tf.TensorSpec(shape=[2, 4, 5], dtype=tf.float32)
+        ])
+        def batch_matmul_func(x, y):
+            return tf.matmul(x, y)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([batch_matmul_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "batch_matmul_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        x_data = np.random.randn(2, 3, 4).astype(np.float32)
+        y_data = np.random.randn(2, 4, 5).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [x_data, y_data])
+        torch_output = graph_module(torch.from_numpy(x_data), torch.from_numpy(y_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="BATCH_MATMUL", rtol=1e-3, atol=1e-3)
 
     def test_placeholder_for_greater_op_codes_operator(self, tmp_path):
         """Test PLACEHOLDER_FOR_GREATER_OP_CODES operator (OP 127)."""
@@ -1714,7 +2480,24 @@ class TestAllTFLiteOperators:
 
     def test_cumsum_operator(self, tmp_path):
         """Test CUMSUM operator (OP 128)."""
-        pytest.skip("CUMSUM requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def cumsum_func(x):
+            return tf.cumsum(x, axis=1)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([cumsum_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "cumsum_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="CUMSUM")
 
     def test_call_once_operator(self, tmp_path):
         """Test CALL_ONCE operator (OP 129)."""
@@ -1722,15 +2505,71 @@ class TestAllTFLiteOperators:
 
     def test_broadcast_to_operator(self, tmp_path):
         """Test BROADCAST_TO operator (OP 130)."""
-        pytest.skip("BROADCAST_TO requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3], dtype=tf.float32)])
+        def broadcast_to_func(x):
+            return tf.broadcast_to(x, [4, 3])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([broadcast_to_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "broadcast_to_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="BROADCAST_TO")
 
     def test_rfft2d_operator(self, tmp_path):
         """Test RFFT2D operator (OP 131)."""
-        pytest.skip("RFFT2D requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4], dtype=tf.float32)])
+        def rfft2d_func(x):
+            return tf.signal.rfft2d(x)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([rfft2d_func.get_concrete_function()])
+        converter.target_spec.supported_ops = [
+            tf.lite.OpsSet.TFLITE_BUILTINS,
+            tf.lite.OpsSet.SELECT_TF_OPS
+        ]
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "rfft2d_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="RFFT2D", rtol=1e-3, atol=1e-3)
 
     def test_conv_3d_operator(self, tmp_path):
         """Test CONV_3D operator (OP 132)."""
-        pytest.skip("CONV_3D requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 4, 4, 4, 3], dtype=tf.float32)])
+        def conv3d_func(x):
+            kernel = tf.constant(np.random.randn(2, 2, 2, 3, 8), dtype=tf.float32)
+            return tf.nn.conv3d(x, kernel, strides=[1, 1, 1, 1, 1], padding='SAME')
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([conv3d_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "conv_3d_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 4, 4, 4, 3).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="CONV_3D", rtol=1e-3, atol=1e-3)
 
     def test_imag_operator(self, tmp_path):
         """Test IMAG operator (OP 133)."""
@@ -1782,7 +2621,28 @@ class TestAllTFLiteOperators:
 
     def test_broadcast_args_operator(self, tmp_path):
         """Test BROADCAST_ARGS operator (OP 145)."""
-        pytest.skip("BROADCAST_ARGS requires complex setup - TODO")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[3], dtype=tf.int32),
+            tf.TensorSpec(shape=[3], dtype=tf.int32)
+        ])
+        def broadcast_args_func(s0, s1):
+            return tf.broadcast_dynamic_shape(s0, s1)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([broadcast_args_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "broadcast_args_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        s0_data = np.array([2, 3, 1], dtype=np.int32)
+        s1_data = np.array([1, 3, 4], dtype=np.int32)
+        
+        tflite_output = run_tflite_model(tflite_model, [s0_data, s1_data])
+        torch_output = graph_module(torch.from_numpy(s0_data), torch.from_numpy(s1_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="BROADCAST_ARGS")
 
     def test_random_standard_normal_operator(self, tmp_path):
         """Test RANDOM_STANDARD_NORMAL operator (OP 146)."""
@@ -1802,7 +2662,24 @@ class TestAllTFLiteOperators:
 
     def test_gelu_operator(self, tmp_path):
         """Test GELU operator (OP 150)."""
-        pytest.skip("GELU requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def gelu_func(x):
+            return tf.nn.gelu(x)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([gelu_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "gelu_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[-2.0, -1.0, 0.0, 1.0, 2.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="GELU", rtol=1e-3, atol=1e-3)
 
     def test_dynamic_update_slice_operator(self, tmp_path):
         """Test DYNAMIC_UPDATE_SLICE operator (OP 151)."""
