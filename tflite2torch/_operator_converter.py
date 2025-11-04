@@ -607,6 +607,7 @@ class OperatorConverter:
 
     def _convert_max_pool2d(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite MAX_POOL_2D to PyTorch MaxPool2d."""
+        # Default stride of 2 is typical for pooling operations in TFLite
         stride_h = options.get("stride_h", 2)
         stride_w = options.get("stride_w", 2)
         filter_height = options.get("filter_height", 2)
@@ -1151,11 +1152,10 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_atan2."""
-            # atan2(y, x) - two inputs
-            if len(input_nodes) >= 2:
-                output_node = graph.call_function(torch.atan2, args=(input_nodes[0], input_nodes[1]))
-            else:
-                output_node = graph.call_function(torch.atan2, args=tuple(input_nodes))
+            # atan2(y, x) requires exactly two inputs
+            if len(input_nodes) < 2:
+                raise ValueError(f"ATAN2 requires 2 inputs, got {len(input_nodes)}")
+            output_node = graph.call_function(torch.atan2, args=(input_nodes[0], input_nodes[1]))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1501,7 +1501,7 @@ class OperatorConverter:
         
         SUM takes 2 inputs: input tensor and reduction_indices tensor.
         """
-        # Default to True since most TFLite models use keepdims=True
+        # Default to True for compatibility with typical TFLite reduction operations
         keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
@@ -1513,7 +1513,16 @@ class OperatorConverter:
                 if axes_idx in weights:
                     axes_tensor = weights[axes_idx]
                     # Convert to Python list of ints
-                    axes = axes_tensor.numpy().tolist() if hasattr(axes_tensor, 'numpy') else axes_tensor.tolist()
+                    try:
+                        if hasattr(axes_tensor, 'numpy'):
+                            axes = axes_tensor.numpy().tolist()
+                        elif hasattr(axes_tensor, 'tolist'):
+                            axes = axes_tensor.tolist()
+                        else:
+                            axes = list(axes_tensor)
+                    except (AttributeError, TypeError) as e:
+                        raise ValueError(f"Cannot convert axes tensor to list: {e}")
+                    
                     if not isinstance(axes, list):
                         axes = [axes]
                     
