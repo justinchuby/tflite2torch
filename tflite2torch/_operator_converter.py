@@ -984,13 +984,28 @@ class OperatorConverter:
 
 
     def _convert_split(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SPLIT to PyTorch split."""
+        """Convert TFLite SPLIT to PyTorch split.
+        
+        TFLite SPLIT: axis (int), input tensor
+        PyTorch split: tensor, split_size_or_sections, dim
+        """
         num_splits = options.get("num_splits", 1)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_split."""
-            output_node = graph.call_function(torch.split, args=tuple(input_nodes), kwargs={"split_size_or_sections": num_splits})
+            # TFLite order: axis, input
+            axis = input_nodes[0]
+            input_tensor = input_nodes[1]
+            
+            # Calculate split size from tensor shape and num_splits
+            def split_impl(input_tensor, axis, num_splits):
+                dim_size = input_tensor.shape[axis.item() if torch.is_tensor(axis) else axis]
+                split_size = dim_size // num_splits
+                axis_val = axis.item() if torch.is_tensor(axis) else axis
+                return torch.split(input_tensor, split_size, dim=axis_val)
+            
+            output_node = graph.call_function(split_impl, args=(input_tensor, axis, num_splits))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1029,7 +1044,8 @@ class OperatorConverter:
     ) -> Callable:
         """Convert TFLite RESIZE_BILINEAR to PyTorch interpolate.
         
-        PyTorch interpolate requires size as tuple of ints.
+        PyTorch interpolate requires size as tuple of ints and NCHW format.
+        TFLite uses NHWC format, so we need to transpose.
         """
         align_corners = options.get("align_corners", False)
         
@@ -1040,15 +1056,22 @@ class OperatorConverter:
             input_tensor = input_nodes[0]
             size_tensor = input_nodes[1]
             
+            # Convert from NHWC to NCHW
+            permute_to_nchw = graph.call_function(torch.permute, args=(input_tensor, (0, 3, 1, 2)))
+            
             # Convert size tensor to tuple
             tolist_node = graph.call_method("tolist", args=(size_tensor,))
             tuple_node = graph.call_function(tuple, args=(tolist_node,))
             
-            output_node = graph.call_function(
+            # Apply interpolate
+            resized = graph.call_function(
                 nn.functional.interpolate, 
-                args=(input_tensor,), 
+                args=(permute_to_nchw,), 
                 kwargs={"size": tuple_node, "mode": "bilinear", "align_corners": align_corners}
             )
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(torch.permute, args=(resized, (0, 2, 3, 1)))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1058,7 +1081,8 @@ class OperatorConverter:
     ) -> Callable:
         """Convert TFLite RESIZE_NEAREST_NEIGHBOR to PyTorch interpolate.
         
-        PyTorch interpolate requires size as tuple of ints.
+        PyTorch interpolate requires size as tuple of ints and NCHW format.
+        TFLite uses NHWC format, so we need to transpose.
         """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
@@ -1067,15 +1091,22 @@ class OperatorConverter:
             input_tensor = input_nodes[0]
             size_tensor = input_nodes[1]
             
+            # Convert from NHWC to NCHW
+            permute_to_nchw = graph.call_function(torch.permute, args=(input_tensor, (0, 3, 1, 2)))
+            
             # Convert size tensor to tuple
             tolist_node = graph.call_method("tolist", args=(size_tensor,))
             tuple_node = graph.call_function(tuple, args=(tolist_node,))
             
-            output_node = graph.call_function(
+            # Apply interpolate
+            resized = graph.call_function(
                 nn.functional.interpolate, 
-                args=(input_tensor,), 
+                args=(permute_to_nchw,), 
                 kwargs={"size": tuple_node, "mode": "nearest"}
             )
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(torch.permute, args=(resized, (0, 2, 3, 1)))
             output_node.name = node_name
             return output_node
         return build_graph
