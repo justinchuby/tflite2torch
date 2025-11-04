@@ -3840,8 +3840,6 @@ class OperatorConverter:
     # Type Conversion
     def _convert_cast(self, inputs: list[Any], options: dict[str, Any]) -> Callable:
         """Convert TFLite CAST to PyTorch to/type conversion."""
-        # Get output dtype from options or infer from output tensor
-        out_data_type = options.get("out_data_type", None)
 
         def build_graph(
             graph: Graph,
@@ -3897,7 +3895,24 @@ class OperatorConverter:
             parameter_dict: dict,
         ) -> Node:
             """Build FX graph for _convert_embedding_lookup."""
-            module = nn.Embedding()
+            # Extract embedding parameters from weights tensor
+            if len(operator.inputs) >= 1:
+                weight_idx = operator.inputs[0]
+                if weight_idx in weights:
+                    weight_tensor = weights[weight_idx]
+                    num_embeddings = weight_tensor.shape[0]
+                    embedding_dim = weight_tensor.shape[1]
+
+                    module = nn.Embedding(
+                        num_embeddings=num_embeddings, embedding_dim=embedding_dim
+                    )
+                    # Load the embedding weights
+                    module.weight.data = weight_tensor
+                else:
+                    raise ValueError("Embedding weights not found in weights dictionary.")
+            else:
+                raise ValueError("Insufficient inputs for EMBEDDING_LOOKUP operator.")
+
             module_name = f"module_{node_counter['count']}"
             node_counter["count"] += 1
             parameter_dict[module_name] = module
