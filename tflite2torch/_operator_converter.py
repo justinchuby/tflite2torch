@@ -12,6 +12,43 @@ import torch.nn as nn
 from torch.fx import Graph, Node
 
 
+def calc_same_padding(x, kernel_h, kernel_w, stride_h, stride_w, dilation_h=1, dilation_w=1):
+    """
+    Calculate TFLite-style SAME padding dynamically based on input shape.
+
+    TFLite SAME padding ensures output_size = ceil(input_size / stride).
+
+    Args:
+        x: Input tensor with shape [N, C, H, W]
+        kernel_h: Kernel height
+        kernel_w: Kernel width
+        stride_h: Stride in height dimension
+        stride_w: Stride in width dimension
+        dilation_h: Dilation in height dimension (default: 1)
+        dilation_w: Dilation in width dimension (default: 1)
+
+    Returns:
+        Padded tensor
+    """
+    _, _, h, w = x.shape
+    # Effective kernel size with dilation
+    eff_kernel_h = (kernel_h - 1) * dilation_h + 1
+    eff_kernel_w = (kernel_w - 1) * dilation_w + 1
+    # Calculate output size (TFLite SAME padding)
+    out_h = (h + stride_h - 1) // stride_h
+    out_w = (w + stride_w - 1) // stride_w
+    # Calculate total padding needed
+    pad_h = max((out_h - 1) * stride_h + eff_kernel_h - h, 0)
+    pad_w = max((out_w - 1) * stride_w + eff_kernel_w - w, 0)
+    # Split padding (TFLite pads more on right/bottom when odd)
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+    # Apply padding (left, right, top, bottom)
+    return torch.nn.functional.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
+
+
 class OperatorConverter:
     """
     Converts TFLite operators to PyTorch equivalents.
@@ -323,37 +360,7 @@ class OperatorConverter:
                     # Add manual padding if needed for SAME padding with stride != 1
                     conv_input = permute_to_nchw
                     if use_manual_padding:
-                        # Calculate TFLite-style SAME padding
-                        # For SAME padding: output_size = ceil(input_size / stride)
-                        # We need to add padding dynamically based on input size
-                        # Using torch.nn.functional.pad with calculated padding
-
-                        # Create a function to calculate and apply padding
-                        def calc_same_padding(
-                            x, kernel_h, kernel_w, stride_h, stride_w, dilation_h, dilation_w
-                        ):
-                            """Calculate SAME padding for TFLite compatibility."""
-                            _, _, h, w = x.shape
-                            # Effective kernel size with dilation
-                            eff_kernel_h = (kernel_h - 1) * dilation_h + 1
-                            eff_kernel_w = (kernel_w - 1) * dilation_w + 1
-                            # Calculate output size (TFLite SAME padding)
-                            out_h = (h + stride_h - 1) // stride_h
-                            out_w = (w + stride_w - 1) // stride_w
-                            # Calculate total padding needed
-                            pad_h = max((out_h - 1) * stride_h + eff_kernel_h - h, 0)
-                            pad_w = max((out_w - 1) * stride_w + eff_kernel_w - w, 0)
-                            # Split padding (TFLite pads more on right/bottom when odd)
-                            pad_top = pad_h // 2
-                            pad_bottom = pad_h - pad_top
-                            pad_left = pad_w // 2
-                            pad_right = pad_w - pad_left
-                            # Apply padding (left, right, top, bottom)
-                            return torch.nn.functional.pad(
-                                x, (pad_left, pad_right, pad_top, pad_bottom)
-                            )
-
-                        # Apply padding
+                        # Apply TFLite-style SAME padding
                         conv_input = graph.call_function(
                             calc_same_padding,
                             args=(
@@ -473,27 +480,8 @@ class OperatorConverter:
                     # Add manual padding if needed for SAME padding with stride != 1
                     conv_input = permute_to_nchw
                     if use_manual_padding:
-                        # Calculate TFLite-style SAME padding
-                        def calc_same_padding(x, kernel_h, kernel_w, stride_h, stride_w):
-                            """Calculate SAME padding for TFLite compatibility."""
-                            _, _, h, w = x.shape
-                            # Calculate output size (TFLite SAME padding)
-                            out_h = (h + stride_h - 1) // stride_h
-                            out_w = (w + stride_w - 1) // stride_w
-                            # Calculate total padding needed
-                            pad_h = max((out_h - 1) * stride_h + kernel_h - h, 0)
-                            pad_w = max((out_w - 1) * stride_w + kernel_w - w, 0)
-                            # Split padding (TFLite pads more on right/bottom when odd)
-                            pad_top = pad_h // 2
-                            pad_bottom = pad_h - pad_top
-                            pad_left = pad_w // 2
-                            pad_right = pad_w - pad_left
-                            # Apply padding (left, right, top, bottom)
-                            return torch.nn.functional.pad(
-                                x, (pad_left, pad_right, pad_top, pad_bottom)
-                            )
-
-                        # Apply padding
+                        # Apply TFLite-style SAME padding
+                        # Note: depthwise conv typically doesn't use dilation, defaulting to 1
                         conv_input = graph.call_function(
                             calc_same_padding,
                             args=(
@@ -502,6 +490,8 @@ class OperatorConverter:
                                 kernel_size[1],
                                 stride_h,
                                 stride_w,
+                                1,  # dilation_h
+                                1,  # dilation_w
                             ),
                         )
 
