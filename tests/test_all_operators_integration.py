@@ -631,7 +631,24 @@ class TestAllTFLiteOperators:
 
     def test_log_softmax_operator(self, tmp_path):
         """Test LOG_SOFTMAX operator (OP 50)."""
-        pytest.skip("LOG_SOFTMAX requires complex setup - TODO")
+        input_layer = tf.keras.layers.Input(shape=(5,))
+        output = tf.keras.layers.Lambda(lambda x: tf.nn.log_softmax(x))(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "log_softmax_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="LOG_SOFTMAX")
 
     def test_delegate_operator(self, tmp_path):
         """Test DELEGATE operator (OP 51)."""
@@ -693,7 +710,24 @@ class TestAllTFLiteOperators:
 
     def test_arg_max_operator(self, tmp_path):
         """Test ARG_MAX operator (OP 56)."""
-        pytest.skip("ARG_MAX requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def arg_max_func(x):
+            return tf.argmax(x, axis=1)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([arg_max_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "arg_max_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.array([[1.0, 5.0, 3.0, 2.0, 4.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="ARG_MAX")
 
     def test_minimum_operator(self, tmp_path):
         """Test MINIMUM operator (OP 57)."""
@@ -1077,7 +1111,24 @@ class TestAllTFLiteOperators:
 
     def test_shape_operator(self, tmp_path):
         """Test SHAPE operator (OP 77)."""
-        pytest.skip("SHAPE requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3, 4], dtype=tf.float32)])
+        def shape_func(x):
+            return tf.shape(x)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([shape_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "shape_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 3, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SHAPE")
 
     def test_pow_operator(self, tmp_path):
         """Test POW operator (OP 78)."""
@@ -1367,7 +1418,23 @@ class TestAllTFLiteOperators:
 
     def test_fill_operator(self, tmp_path):
         """Test FILL operator (OP 94)."""
-        pytest.skip("FILL requires complex setup - TODO")
+        @tf.function
+        def fill_func():
+            return tf.fill([2, 3], 5.0)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([fill_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "fill_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        
+        tflite_output = run_tflite_model(tflite_model, None)
+        torch_output = graph_module()
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="FILL")
 
     def test_floor_mod_operator(self, tmp_path):
         """Test FLOOR_MOD operator (OP 95)."""
@@ -1396,7 +1463,23 @@ class TestAllTFLiteOperators:
 
     def test_range_operator(self, tmp_path):
         """Test RANGE operator (OP 96)."""
-        pytest.skip("RANGE requires complex setup - TODO")
+        @tf.function
+        def range_func():
+            return tf.range(0, 10, 2, dtype=tf.float32)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([range_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "range_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        
+        tflite_output = run_tflite_model(tflite_model, None)
+        torch_output = graph_module()
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="RANGE")
 
     def test_resize_nearest_neighbor_operator(self, tmp_path):
         """Test RESIZE_NEAREST_NEIGHBOR operator (OP 97)."""
