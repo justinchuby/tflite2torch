@@ -12,7 +12,6 @@ from torch.fx import GraphModule
 from ._parser import TFLiteParser
 from ._operator_converter import OperatorConverter
 from ._fx_reconstructor import FXReconstructor
-from ._code_renderer import CodeRenderer
 
 
 class TFLiteToTorchConverter:
@@ -30,7 +29,6 @@ class TFLiteToTorchConverter:
         self.parser = TFLiteParser()
         self.operator_converter = OperatorConverter()
         self.fx_reconstructor = FXReconstructor(self.operator_converter)
-        self.code_renderer = CodeRenderer()
 
     def convert(
         self,
