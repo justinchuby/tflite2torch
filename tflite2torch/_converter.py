@@ -76,7 +76,14 @@ class TFLiteToTorchConverter:
         # Get weights from parser
         weights_dict = self.parser.get_weights(subgraph_index)
         # Convert numpy arrays to torch tensors
-        weights_torch = {idx: torch.from_numpy(weight) for idx, weight in weights_dict.items()}
+        # Convert integer weights to float32 for PyTorch module parameters
+        weights_torch = {}
+        for idx, weight in weights_dict.items():
+            weight_tensor = torch.from_numpy(weight)
+            # Convert to float if not already floating point or complex
+            if not (weight_tensor.is_floating_point() or weight_tensor.is_complex()):
+                weight_tensor = weight_tensor.float()
+            weights_torch[idx] = weight_tensor
         graph_module = self.fx_reconstructor.reconstruct(subgraph, weights=weights_torch)
         print("  Graph reconstruction complete")
 
