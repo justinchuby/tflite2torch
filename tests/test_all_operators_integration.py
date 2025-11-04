@@ -814,11 +814,12 @@ class TestAllTFLiteOperators:
 
     def test_ceil_operator(self, tmp_path):
         """Test CEIL operator (OP 104)."""
-        input_layer = tf.keras.layers.Input(shape=(5,))
-        output = tf.keras.layers.Lambda(lambda x: tf.ceil(x))(input_layer)
-        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        # Use a concrete function instead of Keras model for ceil
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5], dtype=tf.float32)])
+        def ceil_func(x):
+            return tf.math.ceil(x)
         
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([ceil_func.get_concrete_function()])
         tflite_model = converter.convert()
         
         model_path = tmp_path / "ceil_model.tflite"

@@ -637,14 +637,17 @@ class OperatorConverter:
 
     def _convert_avg_pool2d(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite AVERAGE_POOL_2D to PyTorch AvgPool2d."""
-        stride_h = options.get("stride_h", 1)
-        stride_w = options.get("stride_w", 1)
+        stride_h = options.get("stride_h", 2)
+        stride_w = options.get("stride_w", 2)
         filter_height = options.get("filter_height", 2)
         filter_width = options.get("filter_width", 2)
         padding = options.get("padding", "VALID")
 
+        # Convert padding - VALID means no padding (0), SAME means "same"
         if padding == "SAME":
             padding_mode = "same"
+        elif padding == "VALID":
+            padding_mode = 0
         else:
             padding_mode = 0
 
@@ -652,6 +655,12 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_avg_pool2d."""
+            # Convert from NHWC (TFLite) to NCHW (PyTorch)
+            permute_to_nchw = graph.call_function(
+                torch.permute,
+                args=(input_nodes[0], (0, 3, 1, 2))
+            )
+            
             module = nn.AvgPool2d(**{
                 "kernel_size": (filter_height, filter_width),
                 "stride": (stride_h, stride_w),
@@ -660,7 +669,13 @@ class OperatorConverter:
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+            pool_output = graph.call_module(module_name, args=(permute_to_nchw,))
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(
+                torch.permute,
+                args=(pool_output, (0, 2, 3, 1))
+            )
             output_node.name = node_name
             return output_node
         return build_graph
