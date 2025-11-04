@@ -47,6 +47,7 @@ class OperatorConverter:
         self.converters["MAXIMUM"] = self._convert_maximum
         self.converters["MINIMUM"] = self._convert_minimum
         self.converters["MUL"] = self._convert_mul
+        self.converters["ATAN2"] = self._convert_atan2
         self.converters["NEG"] = self._convert_neg
         self.converters["POW"] = self._convert_pow
         self.converters["RSQRT"] = self._convert_rsqrt
@@ -1139,6 +1140,22 @@ class OperatorConverter:
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_pow."""
             output_node = graph.call_function(torch.pow, args=tuple(input_nodes))
+            output_node.name = node_name
+            return output_node
+        return build_graph
+
+    
+    def _convert_atan2(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
+        """Convert TFLite ATAN2 to PyTorch atan2."""
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph for _convert_atan2."""
+            # atan2(y, x) - two inputs
+            if len(input_nodes) >= 2:
+                output_node = graph.call_function(torch.atan2, args=(input_nodes[0], input_nodes[1]))
+            else:
+                output_node = graph.call_function(torch.atan2, args=tuple(input_nodes))
             output_node.name = node_name
             return output_node
         return build_graph

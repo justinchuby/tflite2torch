@@ -1180,7 +1180,28 @@ class TestAllTFLiteOperators:
 
     def test_atan2_operator(self, tmp_path):
         """Test ATAN2 operator (OP 156)."""
-        pytest.skip("ATAN2 not implemented")
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, 5], dtype=tf.float32)
+        ])
+        def atan2_func(y, x):
+            return tf.atan2(y, x)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([atan2_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "atan2_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_y = np.array([[1.0, -1.0, 0.0, 1.0, -1.0]], dtype=np.float32)
+        input_x = np.array([[1.0, 1.0, 1.0, -1.0, -1.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [input_y, input_x])
+        torch_output = graph_module(torch.from_numpy(input_y), torch.from_numpy(input_x))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="ATAN2")
 
     def test_unsorted_segment_min_operator(self, tmp_path):
         """Test UNSORTED_SEGMENT_MIN operator (OP 157)."""
