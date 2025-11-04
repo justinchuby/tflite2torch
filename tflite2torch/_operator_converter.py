@@ -327,9 +327,11 @@ class OperatorConverter:
                         # For SAME padding: output_size = ceil(input_size / stride)
                         # We need to add padding dynamically based on input size
                         # Using torch.nn.functional.pad with calculated padding
-                        
+
                         # Create a function to calculate and apply padding
-                        def calc_same_padding(x, kernel_h, kernel_w, stride_h, stride_w, dilation_h, dilation_w):
+                        def calc_same_padding(
+                            x, kernel_h, kernel_w, stride_h, stride_w, dilation_h, dilation_w
+                        ):
                             """Calculate SAME padding for TFLite compatibility."""
                             _, _, h, w = x.shape
                             # Effective kernel size with dilation
@@ -347,13 +349,22 @@ class OperatorConverter:
                             pad_left = pad_w // 2
                             pad_right = pad_w - pad_left
                             # Apply padding (left, right, top, bottom)
-                            return torch.nn.functional.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
-                        
+                            return torch.nn.functional.pad(
+                                x, (pad_left, pad_right, pad_top, pad_bottom)
+                            )
+
                         # Apply padding
                         conv_input = graph.call_function(
                             calc_same_padding,
-                            args=(permute_to_nchw, kernel_size[0], kernel_size[1], 
-                                  stride_h, stride_w, dilation_h, dilation_w)
+                            args=(
+                                permute_to_nchw,
+                                kernel_size[0],
+                                kernel_size[1],
+                                stride_h,
+                                stride_w,
+                                dilation_h,
+                                dilation_w,
+                            ),
                         )
 
                     # Create Conv2d module
@@ -478,12 +489,20 @@ class OperatorConverter:
                             pad_left = pad_w // 2
                             pad_right = pad_w - pad_left
                             # Apply padding (left, right, top, bottom)
-                            return torch.nn.functional.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
-                        
+                            return torch.nn.functional.pad(
+                                x, (pad_left, pad_right, pad_top, pad_bottom)
+                            )
+
                         # Apply padding
                         conv_input = graph.call_function(
                             calc_same_padding,
-                            args=(permute_to_nchw, kernel_size[0], kernel_size[1], stride_h, stride_w)
+                            args=(
+                                permute_to_nchw,
+                                kernel_size[0],
+                                kernel_size[1],
+                                stride_h,
+                                stride_w,
+                            ),
                         )
 
                     # Create depthwise Conv2d (groups = in_channels)
