@@ -4,6 +4,7 @@ TFLite execution graph reconstruction in Torch FX.
 This module reconstructs the TFLite computational graph as a PyTorch FX graph
 and creates a torch.export.ExportedProgram.
 """
+
 from __future__ import annotations
 
 import torch
@@ -28,7 +29,9 @@ class FXReconstructor:
         self.parameter_dict: dict[str, torch.Tensor] = {}
         self.node_counter = 0
 
-    def reconstruct(self, subgraph: SubgraphInfo, weights: dict[int, torch.Tensor] | None = None) -> torch.fx.GraphModule:
+    def reconstruct(
+        self, subgraph: SubgraphInfo, weights: dict[int, torch.Tensor] | None = None
+    ) -> torch.fx.GraphModule:
         """
         Reconstruct a TFLite subgraph as a PyTorch FX GraphModule.
 
@@ -88,9 +91,7 @@ class FXReconstructor:
             elif input_idx in weights:
                 # Create a get_attr node for weights
                 tensor_info = subgraph.tensors[input_idx]
-                param_name = self._sanitize_name(
-                    tensor_info.name or f"param_{input_idx}"
-                )
+                param_name = self._sanitize_name(tensor_info.name or f"param_{input_idx}")
                 self.parameter_dict[param_name] = weights[input_idx]
                 param_node = self.graph.get_attr(param_name)
                 self.tensor_map[input_idx] = param_node
@@ -98,9 +99,7 @@ class FXReconstructor:
             else:
                 # Create a placeholder for missing weights/constants
                 tensor_info = subgraph.tensors[input_idx]
-                param_name = self._sanitize_name(
-                    tensor_info.name or f"const_{input_idx}"
-                )
+                param_name = self._sanitize_name(tensor_info.name or f"const_{input_idx}")
                 # Create dummy tensor based on shape
                 shape = tensor_info.shape
                 dummy_tensor = torch.zeros(shape)
@@ -119,7 +118,7 @@ class FXReconstructor:
             node_name = f"unsupported_{op_type.lower()}_{op_idx}"
             output_node = self.graph.call_function(
                 lambda *args: args[0] if args else None,
-                args=tuple(input_nodes) if input_nodes else ()
+                args=tuple(input_nodes) if input_nodes else (),
             )
             output_node.name = node_name
             for output_idx in operator.outputs:
@@ -129,7 +128,7 @@ class FXReconstructor:
         # Use the graph builder to create FX nodes
         # All conversion logic is now in the converter itself
         node_name = f"{op_type.lower()}_{op_idx}"
-        node_counter_dict = {'count': self.node_counter}
+        node_counter_dict = {"count": self.node_counter}
 
         output_node = graph_builder(
             self.graph,
@@ -139,11 +138,11 @@ class FXReconstructor:
             subgraph,
             node_name,
             node_counter_dict,
-            self.parameter_dict
+            self.parameter_dict,
         )
 
         # Update node counter
-        self.node_counter = node_counter_dict['count']
+        self.node_counter = node_counter_dict["count"]
 
         # Map output tensor indices to the output node
         for output_idx in operator.outputs:
@@ -158,7 +157,13 @@ class FXReconstructor:
             elif isinstance(value, torch.Tensor):
                 # Only register as parameter if it's a floating point or complex tensor
                 # Integer tensors should be registered as buffers instead
-                if value.dtype in (torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128):
+                if value.dtype in (
+                    torch.float32,
+                    torch.float64,
+                    torch.float16,
+                    torch.complex64,
+                    torch.complex128,
+                ):
                     root.register_parameter(name, nn.Parameter(value))
                 else:
                     root.register_buffer(name, value)
