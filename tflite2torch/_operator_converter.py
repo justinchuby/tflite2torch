@@ -904,13 +904,14 @@ class OperatorConverter:
 
 
     def _convert_gather(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite GATHER to PyTorch gather."""
+        """Convert TFLite GATHER to PyTorch index_select."""
         axis = options.get("axis", 0)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_gather."""
-            output_node = graph.call_function(torch.gather, args=tuple(input_nodes), kwargs={"dim": axis})
+            # torch.index_select expects (input, dim, index)
+            output_node = graph.call_function(torch.index_select, args=(input_nodes[0], axis, input_nodes[1]))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1698,11 +1699,23 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_depth_to_space."""
+            # Convert from NHWC (TFLite) to NCHW (PyTorch)
+            permute_to_nchw = graph.call_function(
+                torch.permute,
+                args=(input_nodes[0], (0, 3, 1, 2))
+            )
+            
             module = nn.PixelShuffle(**{"upscale_factor": block_size})
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+            shuffle_output = graph.call_module(module_name, args=(permute_to_nchw,))
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(
+                torch.permute,
+                args=(shuffle_output, (0, 2, 3, 1))
+            )
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1857,11 +1870,23 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_space_to_depth."""
+            # Convert from NHWC (TFLite) to NCHW (PyTorch)
+            permute_to_nchw = graph.call_function(
+                torch.permute,
+                args=(input_nodes[0], (0, 3, 1, 2))
+            )
+            
             module = nn.PixelUnshuffle(**{"downscale_factor": block_size})
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+            unshuffle_output = graph.call_module(module_name, args=(permute_to_nchw,))
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(
+                torch.permute,
+                args=(unshuffle_output, (0, 2, 3, 1))
+            )
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1925,12 +1950,24 @@ class OperatorConverter:
     
     def _convert_topk_v2(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite TOPK_V2 to PyTorch topk."""
-        k = options.get("k", 1)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_topk_v2."""
-            output_node = graph.call_function(torch.topk, args=tuple(input_nodes), kwargs={"k": k})
+            # TFLite TOPK_V2 has 2 inputs: input tensor and k (as a constant)
+            # We need to get k from the second input if it's a constant
+            k_value = 1
+            if len(operator.inputs) >= 2:
+                k_idx = operator.inputs[1]
+                if k_idx >= 0 and k_idx in weights:
+                    k_tensor = weights[k_idx]
+                    k_value = int(k_tensor.item())
+            
+            # topk returns (values, indices), we need to extract values with getitem
+            topk_output = graph.call_function(torch.topk, args=(input_nodes[0],), kwargs={"k": k_value})
+            # Get the values (first element of the tuple) using operator.getitem
+            import operator as op
+            output_node = graph.call_function(op.getitem, args=(topk_output, 0))
             output_node.name = node_name
             return output_node
         return build_graph
