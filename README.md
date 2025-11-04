@@ -121,7 +121,7 @@ reconstructor = FXReconstructor()
 graph_module = reconstructor.reconstruct(subgraph, weights)
 
 # Visualize the graph
-print(reconstructor.visualize_graph(graph_module))
+print(graph_module.graph)
 ```
 
 ### Stage 4: Code Rendering

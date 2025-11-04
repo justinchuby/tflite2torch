@@ -5,8 +5,7 @@ This module provides functionality to parse TFLite model files and extract
 the computational graph structure, operators, tensors, and metadata.
 """
 
-import struct
-from typing import Dict, List, Optional, Any
+from typing import Any
 import numpy as np
 
 from tensorflow.lite.python import schema_py_generated as schema_fb
@@ -18,10 +17,10 @@ class TensorInfo:
     def __init__(
         self,
         name: str,
-        shape: List[int],
+        shape: list[int],
         dtype: str,
         index: int,
-        quantization: Optional[Dict[str, Any]] = None,
+        quantization: dict[str, Any] | None = None,
     ):
         self.name = name
         self.shape = shape
@@ -39,10 +38,10 @@ class OperatorInfo:
     def __init__(
         self,
         op_type: str,
-        inputs: List[int],
-        outputs: List[int],
-        builtin_options: Optional[Dict[str, Any]] = None,
-        custom_options: Optional[bytes] = None,
+        inputs: list[int],
+        outputs: list[int],
+        builtin_options: dict[str, Any] | None = None,
+        custom_options: bytes | None = None,
     ):
         self.op_type = op_type
         self.inputs = inputs
@@ -59,10 +58,10 @@ class SubgraphInfo:
 
     def __init__(
         self,
-        tensors: List[TensorInfo],
-        operators: List[OperatorInfo],
-        inputs: List[int],
-        outputs: List[int],
+        tensors: list[TensorInfo],
+        operators: list[OperatorInfo],
+        inputs: list[int],
+        outputs: list[int],
         name: str = "",
     ):
         self.tensors = tensors
@@ -300,7 +299,7 @@ class TFLiteParser:
         208: "STABLEHLO_CBRT",
         209: "STABLEHLO_CASE",
     }
-    
+
     # Reverse mapping (name -> code) for lookups
     OPCODE_MAP = {name: code for code, name in OPERATOR_CODES.items()}
 
@@ -321,12 +320,12 @@ class TFLiteParser:
     }
 
     def __init__(self):
-        self.subgraphs: List[SubgraphInfo] = []
+        self.subgraphs: list[SubgraphInfo] = []
         self.model_description: str = ""
         self.version: int = 0
-        self.weights: Dict[int, Dict[int, np.ndarray]] = {}  # subgraph_idx -> tensor_idx -> weights
+        self.weights: dict[int, dict[int, np.ndarray]] = {}  # subgraph_idx -> tensor_idx -> weights
 
-    def parse(self, model_path: str) -> List[SubgraphInfo]:
+    def parse(self, model_path: str) -> list[SubgraphInfo]:
         """
         Parse a TFLite model file.
 
@@ -334,7 +333,7 @@ class TFLiteParser:
             model_path: Path to the TFLite model file
 
         Returns:
-            List of SubgraphInfo objects representing the model's subgraphs
+            list of SubgraphInfo objects representing the model's subgraphs
         """
         # Read and validate the model file
         with open(model_path, "rb") as f:
@@ -348,14 +347,14 @@ class TFLiteParser:
         self._parse_tflite_model(model_data)
 
         return self.subgraphs
-    
-    def get_weights(self, subgraph_idx: int = 0) -> Dict[int, np.ndarray]:
+
+    def get_weights(self, subgraph_idx: int = 0) -> dict[int, np.ndarray]:
         """
         Get weights for a specific subgraph.
-        
+
         Args:
             subgraph_idx: Index of the subgraph
-            
+
         Returns:
             Dictionary mapping tensor index to weight tensor (as numpy array)
         """
@@ -364,18 +363,18 @@ class TFLiteParser:
     def _parse_tflite_model(self, model_data: bytes):
         """
         Parse actual TFLite model using the official schema.
-        
+
         Args:
             model_data: Raw bytes of the TFLite model file
         """
         # Parse the model using FlatBuffers
         model = schema_fb.Model.GetRootAsModel(model_data, 0)
-        
+
         # Get model version and description
         self.version = model.Version()
         description = model.Description()
-        self.model_description = description.decode('utf-8') if description else ""
-        
+        self.model_description = description.decode("utf-8") if description else ""
+
         # Parse all subgraphs
         self.subgraphs = []
         self.weights = {}
@@ -384,15 +383,15 @@ class TFLiteParser:
             self.subgraphs.append(self._parse_subgraph(subgraph, model))
             # Extract weights for this subgraph
             self.weights[subgraph_idx] = self._extract_weights(subgraph, model)
-    
+
     def _parse_subgraph(self, subgraph, model) -> SubgraphInfo:
         """
         Parse a single subgraph from the TFLite model.
-        
+
         Args:
             subgraph: TFLite subgraph object
             model: TFLite model object (for accessing buffers)
-            
+
         Returns:
             SubgraphInfo object
         """
@@ -401,154 +400,150 @@ class TFLiteParser:
         for tensor_idx in range(subgraph.TensorsLength()):
             tensor = subgraph.Tensors(tensor_idx)
             tensors.append(self._parse_tensor(tensor, tensor_idx, model))
-        
+
         # Parse operators
         operators = []
         for op_idx in range(subgraph.OperatorsLength()):
             operator = subgraph.Operators(op_idx)
             operators.append(self._parse_operator(operator, model))
-        
+
         # Get input and output indices
         inputs = [subgraph.Inputs(i) for i in range(subgraph.InputsLength())]
         outputs = [subgraph.Outputs(i) for i in range(subgraph.OutputsLength())]
-        
+
         # Get subgraph name
         name_bytes = subgraph.Name()
-        name = name_bytes.decode('utf-8') if name_bytes else f"subgraph_{len(self.subgraphs)}"
-        
+        name = name_bytes.decode("utf-8") if name_bytes else f"subgraph_{len(self.subgraphs)}"
+
         return SubgraphInfo(
-            tensors=tensors,
-            operators=operators,
-            inputs=inputs,
-            outputs=outputs,
-            name=name
+            tensors=tensors, operators=operators, inputs=inputs, outputs=outputs, name=name
         )
-    
+
     def _parse_tensor(self, tensor, tensor_idx: int, model) -> TensorInfo:
         """
         Parse a tensor from the TFLite model.
-        
+
         Args:
             tensor: TFLite tensor object
             tensor_idx: Index of the tensor in the subgraph
             model: TFLite model object
-            
+
         Returns:
             TensorInfo object
         """
         # Get tensor name
         name_bytes = tensor.Name()
-        name = name_bytes.decode('utf-8') if name_bytes else f"tensor_{tensor_idx}"
-        
+        name = name_bytes.decode("utf-8") if name_bytes else f"tensor_{tensor_idx}"
+
         # Get tensor shape
         shape = [tensor.Shape(i) for i in range(tensor.ShapeLength())]
-        
+
         # Get tensor dtype
         dtype_code = tensor.Type()
         dtype = TFLiteParser.DTYPE_MAP.get(dtype_code, "unknown")
-        
+
         # Parse quantization parameters
         quantization = {}
         quant = tensor.Quantization()
         if quant:
             if quant.ScaleLength() > 0:
-                quantization['scale'] = [quant.Scale(i) for i in range(quant.ScaleLength())]
+                quantization["scale"] = [quant.Scale(i) for i in range(quant.ScaleLength())]
             if quant.ZeroPointLength() > 0:
-                quantization['zero_point'] = [quant.ZeroPoint(i) for i in range(quant.ZeroPointLength())]
-        
+                quantization["zero_point"] = [
+                    quant.ZeroPoint(i) for i in range(quant.ZeroPointLength())
+                ]
+
         return TensorInfo(
-            name=name,
-            shape=shape,
-            dtype=dtype,
-            index=tensor_idx,
-            quantization=quantization
+            name=name, shape=shape, dtype=dtype, index=tensor_idx, quantization=quantization
         )
-    
+
     def _parse_operator(self, operator, model) -> OperatorInfo:
         """
         Parse an operator from the TFLite model.
-        
+
         Args:
             operator: TFLite operator object
             model: TFLite model object
-            
+
         Returns:
             OperatorInfo object
         """
         # Get operator code
         opcode_index = operator.OpcodeIndex()
         opcode = model.OperatorCodes(opcode_index)
-        
+
         # Get builtin code
         builtin_code = opcode.BuiltinCode()
-        
+
         # Map builtin code to operator name
         op_type = self._get_operator_name(builtin_code, opcode)
-        
+
         # Get inputs and outputs
         inputs = [operator.Inputs(i) for i in range(operator.InputsLength())]
         outputs = [operator.Outputs(i) for i in range(operator.OutputsLength())]
-        
+
         # Parse builtin options
         builtin_options = self._parse_builtin_options(operator, builtin_code)
-        
+
         # Get custom options
         custom_options = None
         if operator.CustomOptionsLength() > 0:
-            custom_options = bytes([operator.CustomOptions(i) for i in range(operator.CustomOptionsLength())])
-        
+            custom_options = bytes(
+                [operator.CustomOptions(i) for i in range(operator.CustomOptionsLength())]
+            )
+
         return OperatorInfo(
             op_type=op_type,
             inputs=inputs,
             outputs=outputs,
             builtin_options=builtin_options,
-            custom_options=custom_options
+            custom_options=custom_options,
         )
-    
+
     def _get_operator_name(self, builtin_code: int, opcode) -> str:
         """
         Get the operator name from builtin code.
-        
+
         Args:
             builtin_code: TFLite builtin code
             opcode: TFLite opcode object
-            
+
         Returns:
             Operator name as string
         """
         # Lookup in OPERATOR_CODES
         if builtin_code in TFLiteParser.OPERATOR_CODES:
             return TFLiteParser.OPERATOR_CODES[builtin_code]
-        
+
         # If custom operator, try to get custom code
         custom_code = opcode.CustomCode()
         if custom_code:
-            return custom_code.decode('utf-8')
-        
+            return custom_code.decode("utf-8")
+
         return f"UNKNOWN_{builtin_code}"
-    
-    def _parse_builtin_options(self, operator, builtin_code: int) -> Dict[str, Any]:
+
+    def _parse_builtin_options(self, operator, builtin_code: int) -> dict[str, Any]:
         """
         Parse builtin options for an operator.
-        
+
         Args:
             operator: TFLite operator object
             builtin_code: Builtin operator code
-            
+
         Returns:
             Dictionary of parsed options
         """
         options = {}
         builtin_options_type = operator.BuiltinOptionsType()
-        
+
         if builtin_options_type == 0:  # NONE
             return options
-        
+
         # Get the builtin options object
         builtin_opts = operator.BuiltinOptions()
         if not builtin_opts:
             return options
-        
+
         # Parse common options based on operator type
         # This is a simplified version - full implementation would handle all operator types
         try:
@@ -556,39 +551,52 @@ class TFLiteParser:
             if builtin_code == TFLiteParser.OPCODE_MAP.get("CONV_2D"):
                 opts = schema_fb.Conv2DOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options['padding'] = self._get_padding_name(opts.Padding())
-                options['stride_w'] = opts.StrideW()
-                options['stride_h'] = opts.StrideH()
-                options['fused_activation_function'] = self._get_activation_name(opts.FusedActivationFunction())
+                options["padding"] = self._get_padding_name(opts.Padding())
+                options["stride_w"] = opts.StrideW()
+                options["stride_h"] = opts.StrideH()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
             elif builtin_code == TFLiteParser.OPCODE_MAP.get("FULLY_CONNECTED"):
                 opts = schema_fb.FullyConnectedOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options['fused_activation_function'] = self._get_activation_name(opts.FusedActivationFunction())
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
             elif builtin_code == TFLiteParser.OPCODE_MAP.get("LEAKY_RELU"):
                 opts = schema_fb.LeakyReluOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options['alpha'] = opts.Alpha()
+                options["alpha"] = opts.Alpha()
             elif builtin_code == TFLiteParser.OPCODE_MAP.get("CONV_3D"):
                 opts = schema_fb.Conv3DOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options['padding'] = self._get_padding_name(opts.Padding())
-                options['stride'] = [opts.StrideD(), opts.StrideH(), opts.StrideW()]
-                options['fused_activation_function'] = self._get_activation_name(opts.FusedActivationFunction())
+                options["padding"] = self._get_padding_name(opts.Padding())
+                options["stride"] = [opts.StrideD(), opts.StrideH(), opts.StrideW()]
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
             # Add more operator-specific option parsing as needed
         except Exception as e:
             # If parsing fails, return empty options
             pass
-        
+
         return options
-    
+
     def _get_padding_name(self, padding_code: int) -> str:
         """Get padding name from code."""
         padding_map = {0: "SAME", 1: "VALID"}
         return padding_map.get(padding_code, "UNKNOWN")
-    
+
     def _get_activation_name(self, activation_code: int) -> str:
         """Get activation function name from code."""
-        activation_map = {0: "NONE", 1: "RELU", 2: "RELU_N1_TO_1", 3: "RELU6", 4: "TANH", 5: "SIGN_BIT"}
+        activation_map = {
+            0: "NONE",
+            1: "RELU",
+            2: "RELU_N1_TO_1",
+            3: "RELU6",
+            4: "TANH",
+            5: "SIGN_BIT",
+        }
         return activation_map.get(activation_code, "NONE")
 
     def get_tensor_by_index(self, subgraph_idx: int, tensor_idx: int) -> TensorInfo:
@@ -602,7 +610,7 @@ class TFLiteParser:
 
         return subgraph.tensors[tensor_idx]
 
-    def get_input_tensors(self, subgraph_idx: int = 0) -> List[TensorInfo]:
+    def get_input_tensors(self, subgraph_idx: int = 0) -> list[TensorInfo]:
         """Get the input tensors for a subgraph."""
         if subgraph_idx >= len(self.subgraphs):
             raise IndexError(f"Subgraph index {subgraph_idx} out of range")
@@ -610,47 +618,47 @@ class TFLiteParser:
         subgraph = self.subgraphs[subgraph_idx]
         return [subgraph.tensors[idx] for idx in subgraph.inputs]
 
-    def get_output_tensors(self, subgraph_idx: int = 0) -> List[TensorInfo]:
+    def get_output_tensors(self, subgraph_idx: int = 0) -> list[TensorInfo]:
         """Get the output tensors for a subgraph."""
         if subgraph_idx >= len(self.subgraphs):
             raise IndexError(f"Subgraph index {subgraph_idx} out of range")
 
         subgraph = self.subgraphs[subgraph_idx]
         return [subgraph.tensors[idx] for idx in subgraph.outputs]
-    
-    def _extract_weights(self, subgraph, model) -> Dict[int, np.ndarray]:
+
+    def _extract_weights(self, subgraph, model) -> dict[int, np.ndarray]:
         """
         Extract weight tensors from the model buffers.
-        
+
         Args:
             subgraph: TFLite subgraph object
             model: TFLite model object
-            
+
         Returns:
             Dictionary mapping tensor index to weight data as numpy array
         """
         weights = {}
-        
+
         for tensor_idx in range(subgraph.TensorsLength()):
             tensor = subgraph.Tensors(tensor_idx)
             buffer_idx = tensor.Buffer()
-            
+
             # Skip if buffer is 0 (no data) or tensor is an input/output
             if buffer_idx == 0:
                 continue
-            
+
             # Get the buffer
             buffer = model.Buffers(buffer_idx)
             if buffer is None or buffer.DataLength() == 0:
                 continue
-            
+
             # Extract data from buffer
             data = buffer.DataAsNumpy()
-            
+
             # Get tensor properties
             shape = [tensor.Shape(i) for i in range(tensor.ShapeLength())]
             dtype_code = tensor.Type()
-            
+
             # Map TFLite dtype to numpy dtype
             dtype_map = {
                 0: np.float32,
@@ -665,9 +673,9 @@ class TFLiteParser:
                 10: np.float64,
                 11: np.complex128,
             }
-            
+
             numpy_dtype = dtype_map.get(dtype_code, np.float32)
-            
+
             # Reshape data to tensor shape
             try:
                 weight_tensor = np.frombuffer(data, dtype=numpy_dtype).reshape(shape)
@@ -676,5 +684,5 @@ class TFLiteParser:
                 # Skip tensors that can't be reshaped
                 print(f"Warning: Could not extract weight for tensor {tensor_idx}: {e}")
                 continue
-        
+
         return weights
