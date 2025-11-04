@@ -5,7 +5,6 @@ This module provides the high-level API for converting TFLite models
 to PyTorch models, utilizing all four stages of the conversion pipeline.
 """
 
-from typing import Optional, Dict, Union
 import os
 import torch
 from torch.fx import GraphModule
@@ -36,21 +35,17 @@ class TFLiteToTorchConverter:
     def convert(
         self,
         tflite_model_path: str,
-        output_path: Optional[str] = None,
-        generate_code: bool = True,
         subgraph_index: int = 0,
-    ) -> Union[GraphModule, str]:
+    ) -> GraphModule:
         """
         Convert a TFLite model to PyTorch.
 
         Args:
             tflite_model_path: Path to the TFLite model file (.tflite)
-            output_path: Optional path to save generated PyTorch code
-            generate_code: Whether to generate Python code (vs returning GraphModule)
             subgraph_index: Index of the subgraph to convert (default: 0)
 
         Returns:
-            GraphModule if generate_code is False, otherwise the generated code as string
+            GraphModule.
 
         Raises:
             FileNotFoundError: If the TFLite model file doesn't exist
@@ -88,75 +83,36 @@ class TFLiteToTorchConverter:
         graph_module = self.fx_reconstructor.reconstruct(subgraph, weights=weights_torch)
         print("  Graph reconstruction complete")
 
-        # Optionally visualize the graph
-        graph_viz = str(graph_module.graph)
-        print("\n" + graph_viz)
-
-        # Stage 4: Render to code (if requested)
-        if generate_code:
-            print("\nStage 4: Rendering PyTorch code...")
-            code = self.code_renderer.render(graph_module, class_name="ConvertedModel")
-            print("  Code generation complete")
-
-            if output_path:
-                self.code_renderer.save_to_file(code, output_path)
-                print(f"  Saved to {output_path}")
-
-            return code
-        else:
-            return graph_module
+        return graph_module
 
     def convert_and_save(
         self,
         tflite_model_path: str,
-        output_code_path: str,
+        output_path: str,
         subgraph_index: int = 0,
-    ) -> str:
+    ) -> None:
         """
         Convert TFLite model and save the generated code to a file.
 
         Args:
             tflite_model_path: Path to the TFLite model file
-            output_code_path: Path where to save the generated PyTorch code
+            output_path: Path where to save the generated PyTorch code
             subgraph_index: Index of the subgraph to convert
 
         Returns:
             Generated PyTorch code as string
         """
-        return self.convert(
-            tflite_model_path=tflite_model_path,
-            output_path=output_code_path,
-            generate_code=True,
-            subgraph_index=subgraph_index,
+        graph_module = self.convert(
+            tflite_model_path=tflite_model_path, subgraph_index=subgraph_index
         )
-
-    def convert_to_graph_module(
-        self,
-        tflite_model_path: str,
-        subgraph_index: int = 0,
-    ) -> GraphModule:
-        """
-        Convert TFLite model to PyTorch GraphModule without code generation.
-
-        Args:
-            tflite_model_path: Path to the TFLite model file
-            subgraph_index: Index of the subgraph to convert
-
-        Returns:
-            PyTorch FX GraphModule
-        """
-        return self.convert(
-            tflite_model_path=tflite_model_path,
-            generate_code=False,
-            subgraph_index=subgraph_index,
-        )
+        graph_module.to_folder(output_path)
 
 
 def convert_tflite_to_torch(
     tflite_model_path: str,
-    output_path: Optional[str] = None,
+    output_path: str,
     subgraph_index: int = 0,
-) -> str:
+) -> None:
     """
     Convert a TFLite model to PyTorch code.
 
@@ -168,7 +124,7 @@ def convert_tflite_to_torch(
 
     Args:
         tflite_model_path: Path to the TFLite model file (.tflite)
-        output_path: Optional path to save generated PyTorch code
+        output_path: Path to save generated PyTorch code
         subgraph_index: Index of the subgraph to convert (default: 0)
 
     Returns:
@@ -182,10 +138,9 @@ def convert_tflite_to_torch(
         >>> code = convert_tflite_to_torch("model.tflite", "model.py")
     """
     converter = TFLiteToTorchConverter()
-    return converter.convert(
+    converter.convert_and_save(
         tflite_model_path=tflite_model_path,
         output_path=output_path,
-        generate_code=True,
         subgraph_index=subgraph_index,
     )
 
@@ -215,11 +170,7 @@ def convert_tflite_to_graph_module(
         >>> output = graph_module(input_tensor)
     """
     converter = TFLiteToTorchConverter()
-    return converter.convert(
-        tflite_model_path=tflite_model_path,
-        generate_code=False,
-        subgraph_index=subgraph_index,
-    )
+    return converter.convert(tflite_model_path=tflite_model_path, subgraph_index=subgraph_index)
 
 
 def convert_tflite_to_exported_program(
@@ -254,13 +205,9 @@ def convert_tflite_to_exported_program(
         >>> exported = convert_tflite_to_exported_program("model.tflite")
 
     Note:
-        Requires PyTorch 2.0+ with torch.export support.
+        Requires PyTorch 2.7+ with torch.export support.
     """
     converter = TFLiteToTorchConverter()
     graph_module = converter.convert(
-        tflite_model_path=tflite_model_path,
-        generate_code=False,
-        subgraph_index=subgraph_index,
+        tflite_model_path=tflite_model_path, subgraph_index=subgraph_index
     )
-
-    return converter.fx_reconstructor.to_exported_program(graph_module, example_inputs)
