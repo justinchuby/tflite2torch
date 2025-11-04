@@ -1951,12 +1951,35 @@ class OperatorConverter:
 
     
     def _convert_fill(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite FILL to PyTorch full."""
+        """Convert TFLite FILL to PyTorch full.
+        
+        TFLite FILL: dims (shape), value
+        PyTorch full: size (tuple), fill_value
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_fill."""
-            output_node = graph.call_function(torch.full, args=tuple(input_nodes))
+            # Get dims from weights if it's a constant
+            dims_idx = operator.inputs[0]
+            if dims_idx in weights:
+                dims = weights[dims_idx].tolist()
+                value = input_nodes[0]  # The input_nodes contains non-constant inputs
+            else:
+                dims_tensor = input_nodes[0]
+                value = input_nodes[1]
+                # Convert dims tensor to tuple
+                dims = graph.call_method("tolist", args=(dims_tensor,))
+            
+            # Custom fill implementation
+            def fill_impl(dims, value):
+                if isinstance(dims, torch.Tensor):
+                    dims = dims.tolist()
+                if torch.is_tensor(value):
+                    value = value.item()
+                return torch.full(tuple(dims), value)
+            
+            output_node = graph.call_function(fill_impl, args=(dims, value))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2087,12 +2110,43 @@ class OperatorConverter:
 
     
     def _convert_range(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite RANGE to PyTorch arange."""
+        """Convert TFLite RANGE to PyTorch arange.
+        
+        TFLite RANGE: start, limit, delta
+        PyTorch arange: start, end, step
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_range."""
-            output_node = graph.call_function(torch.arange, args=tuple(input_nodes))
+            # Get start, limit, delta from weights if they're constants
+            start_idx = operator.inputs[0]
+            limit_idx = operator.inputs[1]
+            delta_idx = operator.inputs[2]
+            
+            # Try to get from weights first
+            if start_idx in weights and limit_idx in weights and delta_idx in weights:
+                start = weights[start_idx].item()
+                limit = weights[limit_idx].item()
+                delta = weights[delta_idx].item()
+                output_node = graph.call_function(torch.arange, args=(start, limit, delta))
+            else:
+                # Dynamic case
+                start = input_nodes[0] if len(input_nodes) > 0 else weights.get(start_idx, 0)
+                limit = input_nodes[1] if len(input_nodes) > 1 else weights.get(limit_idx, 0)
+                delta = input_nodes[2] if len(input_nodes) > 2 else weights.get(delta_idx, 1)
+                
+                def range_impl(start, limit, delta):
+                    if torch.is_tensor(start):
+                        start = start.item()
+                    if torch.is_tensor(limit):
+                        limit = limit.item()
+                    if torch.is_tensor(delta):
+                        delta = delta.item()
+                    return torch.arange(start, limit, delta)
+                
+                output_node = graph.call_function(range_impl, args=(start, limit, delta))
+            
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2206,16 +2260,19 @@ class OperatorConverter:
 
     
     def _convert_shape(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SHAPE to PyTorch shape property."""
+        """Convert TFLite SHAPE to PyTorch shape property.
+        
+        Returns the shape of the input tensor as a tensor.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_shape."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            # Get shape and convert to tensor
+            def shape_to_tensor(x):
+                return torch.tensor(list(x.shape), dtype=torch.int32)
+            
+            output_node = graph.call_function(shape_to_tensor, args=(input_nodes[0],))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2411,12 +2468,24 @@ class OperatorConverter:
 
     
     def _convert_zeros_like(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite ZEROS_LIKE to PyTorch zeros_like."""
+        """Convert TFLite ZEROS_LIKE to PyTorch zeros_like.
+        
+        ZEROS_LIKE takes a tensor input (or a shape from weights).
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_zeros_like."""
-            output_node = graph.call_function(torch.zeros_like, args=tuple(input_nodes))
+            # Check if input is from weights (constant)
+            input_idx = operator.inputs[0]
+            if input_idx in weights:
+                # Create zeros with the same shape as the weight
+                weight_shape = weights[input_idx].shape
+                output_node = graph.call_function(torch.zeros, args=(weight_shape,))
+            else:
+                # Dynamic case
+                output_node = graph.call_function(torch.zeros_like, args=(input_nodes[0],))
+            
             output_node.name = node_name
             return output_node
         return build_graph
