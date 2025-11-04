@@ -877,16 +877,31 @@ class OperatorConverter:
         
         PAD takes 2 inputs: input tensor and paddings tensor.
         The paddings tensor needs to be converted to a tuple.
+        TFLite format: [[pad_before_dim_0, pad_after_dim_0], ...]
+        PyTorch format: (left, right, top, bottom, ...) - reversed
         """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_pad."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            input_tensor = input_nodes[0]
+            pad_tensor = input_nodes[1]
+            
+            # Custom pad conversion
+            def convert_pad(input_tensor, pad_tensor):
+                # Convert padding format
+                pad_list = []
+                ndim = pad_tensor.shape[0]
+                for i in range(ndim - 1, -1, -1):
+                    pad_list.extend([pad_tensor[i, 0].item(), pad_tensor[i, 1].item()])
+                
+                # Skip leading zero paddings
+                while len(pad_list) > 0 and pad_list[-2] == 0 and pad_list[-1] == 0:
+                    pad_list = pad_list[:-2]
+                
+                return torch.nn.functional.pad(input_tensor, tuple(pad_list), mode='constant', value=0)
+            
+            output_node = graph.call_function(convert_pad, args=(input_tensor, pad_tensor))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -918,12 +933,37 @@ class OperatorConverter:
 
 
     def _convert_slice(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SLICE to PyTorch slice indexing."""
+        """Convert TFLite SLICE to PyTorch slice indexing.
+        
+        TFLite SLICE: input, begin, size
+        PyTorch uses tensor indexing with slices.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_slice."""
-            output_node = graph.call_function(torch.slice, args=tuple(input_nodes))
+            input_tensor = input_nodes[0]
+            begin = input_nodes[1]
+            size = input_nodes[2]
+            
+            # Custom slice implementation
+            def slice_impl(input_tensor, begin, size):
+                # Convert tensors to lists
+                begin_list = begin.tolist() if torch.is_tensor(begin) else begin
+                size_list = size.tolist() if torch.is_tensor(size) else size
+                
+                # Build slice objects for each dimension
+                slices = []
+                for b, s in zip(begin_list, size_list):
+                    if s == -1:
+                        # -1 means slice to the end
+                        slices.append(slice(b, None))
+                    else:
+                        slices.append(slice(b, b + s))
+                
+                return input_tensor[tuple(slices)]
+            
+            output_node = graph.call_function(slice_impl, args=(input_tensor, begin, size))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -987,17 +1027,27 @@ class OperatorConverter:
     def _convert_resize_bilinear(
         self, inputs: List[Any], options: Dict[str, Any]
     ) -> Callable:
-        """Convert TFLite RESIZE_BILINEAR to PyTorch interpolate."""
+        """Convert TFLite RESIZE_BILINEAR to PyTorch interpolate.
+        
+        PyTorch interpolate requires size as tuple of ints.
+        """
         align_corners = options.get("align_corners", False)
         
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_resize_bilinear."""
+            input_tensor = input_nodes[0]
+            size_tensor = input_nodes[1]
+            
+            # Convert size tensor to tuple
+            tolist_node = graph.call_method("tolist", args=(size_tensor,))
+            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            
             output_node = graph.call_function(
                 nn.functional.interpolate, 
-                args=tuple(input_nodes), 
-                kwargs={"mode": "bilinear", "align_corners": align_corners}
+                args=(input_tensor,), 
+                kwargs={"size": tuple_node, "mode": "bilinear", "align_corners": align_corners}
             )
             output_node.name = node_name
             return output_node
@@ -1006,12 +1056,26 @@ class OperatorConverter:
     def _convert_resize_nearest(
         self, inputs: List[Any], options: Dict[str, Any]
     ) -> Callable:
-        """Convert TFLite RESIZE_NEAREST_NEIGHBOR to PyTorch interpolate."""
+        """Convert TFLite RESIZE_NEAREST_NEIGHBOR to PyTorch interpolate.
+        
+        PyTorch interpolate requires size as tuple of ints.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_resize_nearest."""
-            output_node = graph.call_function(nn.functional.interpolate, args=tuple(input_nodes), kwargs={"mode": "nearest"})
+            input_tensor = input_nodes[0]
+            size_tensor = input_nodes[1]
+            
+            # Convert size tensor to tuple
+            tolist_node = graph.call_method("tolist", args=(size_tensor,))
+            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            
+            output_node = graph.call_function(
+                nn.functional.interpolate, 
+                args=(input_tensor,), 
+                kwargs={"size": tuple_node, "mode": "nearest"}
+            )
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1478,12 +1542,30 @@ class OperatorConverter:
 
     
     def _convert_prelu(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite PRELU to PyTorch PReLU."""
+        """Convert TFLite PRELU to PyTorch PReLU.
+        
+        PReLU has 2 inputs: input tensor and alpha (slope) tensor.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_prelu."""
-            module = nn.PReLU()
+            # Get alpha from weights or inputs
+            alpha_data = None
+            if len(operator.inputs) >= 2:
+                alpha_idx = operator.inputs[1]
+                if alpha_idx in weights:
+                    alpha_data = weights[alpha_idx]
+            
+            if alpha_data is not None:
+                # Create PReLU with the alpha values
+                num_parameters = alpha_data.numel()
+                module = nn.PReLU(num_parameters=num_parameters)
+                module.weight.data = alpha_data.flatten()
+            else:
+                # Default PReLU
+                module = nn.PReLU()
+            
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
@@ -1934,12 +2016,40 @@ class OperatorConverter:
 
     
     def _convert_padv2(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite PADV2 to PyTorch pad."""
+        """Convert TFLite PADV2 to PyTorch pad.
+        
+        PADV2 takes 3 inputs: input tensor, paddings tensor, and constant_values.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_padv2."""
-            output_node = graph.call_function(torch.nn.functional.pad, args=tuple(input_nodes))
+            input_tensor = input_nodes[0]
+            pad_tensor = input_nodes[1]
+            constant_value = input_nodes[2] if len(input_nodes) > 2 else None
+            
+            # Custom pad conversion
+            def convert_padv2(input_tensor, pad_tensor, constant_value=0):
+                # Convert padding format
+                pad_list = []
+                ndim = pad_tensor.shape[0]
+                for i in range(ndim - 1, -1, -1):
+                    pad_list.extend([pad_tensor[i, 0].item(), pad_tensor[i, 1].item()])
+                
+                # Skip leading zero paddings
+                while len(pad_list) > 0 and pad_list[-2] == 0 and pad_list[-1] == 0:
+                    pad_list = pad_list[:-2]
+                
+                # Get constant value if it's a tensor
+                if torch.is_tensor(constant_value):
+                    constant_value = constant_value.item()
+                
+                return torch.nn.functional.pad(input_tensor, tuple(pad_list), mode='constant', value=constant_value)
+            
+            if constant_value is not None:
+                output_node = graph.call_function(convert_padv2, args=(input_tensor, pad_tensor, constant_value))
+            else:
+                output_node = graph.call_function(convert_padv2, args=(input_tensor, pad_tensor))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2149,28 +2259,59 @@ class OperatorConverter:
 
     
     def _convert_strided_slice(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite STRIDED_SLICE to PyTorch slice."""
+        """Convert TFLite STRIDED_SLICE to PyTorch slice.
+        
+        TFLite STRIDED_SLICE: input, begin, end, strides
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_strided_slice."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
+            input_tensor = input_nodes[0]
+            begin = input_nodes[1]
+            end = input_nodes[2]
+            strides = input_nodes[3] if len(input_nodes) > 3 else None
+            
+            # Custom strided slice implementation
+            def strided_slice_impl(input_tensor, begin, end, strides=None):
+                # Convert tensors to lists
+                begin_list = begin.tolist() if torch.is_tensor(begin) else begin
+                end_list = end.tolist() if torch.is_tensor(end) else end
+                stride_list = strides.tolist() if strides is not None and torch.is_tensor(strides) else ([1] * len(begin_list) if strides is None else strides)
+                
+                # Build slice objects for each dimension
+                slices = []
+                for b, e, s in zip(begin_list, end_list, stride_list):
+                    slices.append(slice(b, e, s))
+                
+                return input_tensor[tuple(slices)]
+            
+            if strides is not None:
+                output_node = graph.call_function(strided_slice_impl, args=(input_tensor, begin, end, strides))
             else:
-                output_node = graph.call_function(lambda: None, args=())
+                output_node = graph.call_function(strided_slice_impl, args=(input_tensor, begin, end))
             output_node.name = node_name
             return output_node
         return build_graph
 
     
     def _convert_tile(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite TILE to PyTorch tile."""
+        """Convert TFLite TILE to PyTorch tile.
+        
+        PyTorch tile requires dims as tuple of ints, not a tensor.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_tile."""
-            output_node = graph.call_function(torch.tile, args=tuple(input_nodes))
+            input_tensor = input_nodes[0]
+            multiples_tensor = input_nodes[1]
+            
+            # Convert multiples tensor to tuple
+            tolist_node = graph.call_method("tolist", args=(multiples_tensor,))
+            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            
+            output_node = graph.call_function(torch.tile, args=(input_tensor, tuple_node))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2590,15 +2731,36 @@ class OperatorConverter:
     # Type Conversion
     def _convert_cast(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite CAST to PyTorch to/type conversion."""
+        # Get output dtype from options or infer from output tensor
+        out_data_type = options.get("out_data_type", None)
+        
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_cast."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            # Map numpy dtype strings to PyTorch dtypes
+            dtype_str_map = {
+                'float32': torch.float32,
+                'float16': torch.float16,
+                'int32': torch.int32,
+                'uint8': torch.uint8,
+                'int64': torch.int64,
+                'bool': torch.bool,
+                'int16': torch.int16,
+                'complex64': torch.complex64,
+                'int8': torch.int8,
+                'complex128': torch.complex128,
+            }
+            
+            # Get target dtype from output tensor
+            target_dtype = torch.float32  # default
+            if len(operator.outputs) > 0:
+                output_idx = operator.outputs[0]
+                output_tensor = subgraph.tensors[output_idx]
+                target_dtype = dtype_str_map.get(output_tensor.dtype, torch.float32)
+            
+            # Cast the input
+            output_node = graph.call_method("to", args=(input_nodes[0], target_dtype))
             output_node.name = node_name
             return output_node
         return build_graph
