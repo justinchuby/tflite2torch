@@ -6,7 +6,7 @@ import pytest
 import tensorflow as tf
 from torch.fx import GraphModule
 from tflite2torch._converter import (
-    _TFLiteToTorchConverter,
+    TFLiteToTorchConverter,
     convert_tflite_to_torch,
     convert_tflite_to_graph_module,
     convert_tflite_to_exported_program,
@@ -33,7 +33,7 @@ class TestTFLiteToTorchConverter:
 
     def test_converter_initialization(self):
         """Test converter initialization."""
-        converter = _TFLiteToTorchConverter()
+        converter = TFLiteToTorchConverter()
         assert converter.parser is not None
         assert converter.operator_converter is not None
         assert converter.fx_reconstructor is not None
@@ -41,7 +41,7 @@ class TestTFLiteToTorchConverter:
 
     def test_convert_to_code(self):
         """Test converting to code."""
-        converter = _TFLiteToTorchConverter()
+        converter = TFLiteToTorchConverter()
 
         # Create a temporary mock file
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
@@ -62,7 +62,7 @@ class TestTFLiteToTorchConverter:
 
     def test_convert_to_graph_module(self):
         """Test converting to GraphModule."""
-        converter = _TFLiteToTorchConverter()
+        converter = TFLiteToTorchConverter()
 
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
             f.write(create_test_tflite_model())
@@ -79,7 +79,7 @@ class TestTFLiteToTorchConverter:
 
     def test_convert_and_save(self):
         """Test converting and saving to file."""
-        converter = _TFLiteToTorchConverter()
+        converter = TFLiteToTorchConverter()
 
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
             f.write(create_test_tflite_model())
@@ -107,13 +107,13 @@ class TestTFLiteToTorchConverter:
 
     def test_convert_nonexistent_file(self):
         """Test converting nonexistent file raises error."""
-        converter = _TFLiteToTorchConverter()
+        converter = TFLiteToTorchConverter()
         with pytest.raises(FileNotFoundError):
             converter.convert("nonexistent_file.tflite")
 
     def test_convert_to_graph_module_method(self):
         """Test convert_to_graph_module method."""
-        converter = _TFLiteToTorchConverter()
+        converter = TFLiteToTorchConverter()
 
         with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".tflite") as f:
             f.write(create_test_tflite_model())

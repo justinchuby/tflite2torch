@@ -5,6 +5,8 @@ This module provides the high-level API for converting TFLite models
 to PyTorch models, utilizing all four stages of the conversion pipeline.
 """
 
+from __future__ import annotations
+
 import os
 import torch
 from torch.fx import GraphModule
@@ -14,7 +16,7 @@ from ._operator_converter import OperatorConverter
 from ._fx_reconstructor import FXReconstructor
 
 
-class _TFLiteToTorchConverter:
+class TFLiteToTorchConverter:
     """
     Main converter class for TFLite to PyTorch conversion.
 
@@ -105,7 +107,7 @@ def convert_tflite_to_torch(
         >>> # Convert and save to folder
         >>> convert_tflite_to_torch("model.tflite", "output_folder")
     """
-    converter = _TFLiteToTorchConverter()
+    converter = TFLiteToTorchConverter()
     graph_module = converter.convert(
         tflite_model_path=tflite_model_path,
         subgraph_index=subgraph_index,
@@ -135,7 +137,7 @@ def convert_tflite_to_graph_module(tflite_model_path: str, subgraph_index: int =
         >>> graph_module = convert_tflite_to_graph_module("model.tflite")
         >>> output = graph_module(input_tensor)
     """
-    converter = _TFLiteToTorchConverter()
+    converter = TFLiteToTorchConverter()
     return converter.convert(tflite_model_path=tflite_model_path, subgraph_index=subgraph_index)
 
 
@@ -148,7 +150,7 @@ def convert_tflite_to_exported_program(tflite_model_path: str, subgraph_index: i
     1. TFLite graph parsing
     2. TFLite to Torch operator conversion
     3. Reconstruction of the TFLite execution graph in Torch FX
-    4. Export to ExportedProgram
+    4. Export to ExportedProgram with proper input signature
 
     Args:
         tflite_model_path: Path to the TFLite model file (.tflite)
@@ -163,7 +165,72 @@ def convert_tflite_to_exported_program(tflite_model_path: str, subgraph_index: i
     Note:
         Requires PyTorch 2.7+ with torch.export support.
     """
-    converter = _TFLiteToTorchConverter()
+
+    # TFLite dtype to PyTorch dtype mapping
+    dtype_str_map = {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "int32": torch.int32,
+        "uint8": torch.uint8,
+        "int64": torch.int64,
+        "bool": torch.bool,
+        "int16": torch.int16,
+        "complex64": torch.complex64,
+        "int8": torch.int8,
+        "complex128": torch.complex128,
+    }
+
+    converter = TFLiteToTorchConverter()
+    parser = TFLiteParser()
+
+    # Get input tensor information from the TFLite model
+    input_tensors = parser.parse(tflite_model_path)
+    if not input_tensors or subgraph_index >= len(input_tensors):
+        raise ValueError(f"Invalid subgraph index {subgraph_index}")
+
+    # Get input tensor specs for the specified subgraph
+    input_tensor_infos = parser.get_input_tensors(subgraph_index)
+
+    # Create example inputs based on input tensor specifications
+    example_inputs_1 = []
+    example_inputs_2 = []
+
+    for i, tensor_info in enumerate(input_tensor_infos):
+        # Convert TFLite dtype to PyTorch dtype
+        torch_dtype = dtype_str_map[tensor_info.dtype]
+
+        # Handle dynamic shapes
+        example_shape_1 = tensor_info.shape.copy()
+        example_shape_2 = tensor_info.shape.copy()
+
+        # Replace any -1 dimensions with a concrete size for example input
+        for j, dim in enumerate(example_shape_1):
+            if dim == -1:
+                if j == 0:  # batch dimension
+                    example_shape_1[j] = 2
+                else:
+                    example_shape_1[j] = 224  # Default size 1 for other unknown dimensions
+
+        for j, dim in enumerate(example_shape_2):
+            if dim == -1:
+                if j == 0:  # batch dimension
+                    example_shape_2[j] = 3
+                else:
+                    example_shape_2[j] = 256  # Default size 2 for other unknown dimensions
+
+        # Create example input tensor
+        example_input_1 = torch.randn(example_shape_1, dtype=torch_dtype)
+        example_input_2 = torch.randn(example_shape_2, dtype=torch_dtype)
+        example_inputs_1.append(example_input_1)
+        example_inputs_2.append(example_input_2)
+
+    dynamic_shapes = torch.export.AdditionalInputs()
+    dynamic_shapes.add(*example_inputs_1)
+    dynamic_shapes.add(*example_inputs_2)
+
+    # Convert TFLite model to GraphModule
     graph_module = converter.convert(
         tflite_model_path=tflite_model_path, subgraph_index=subgraph_index
     )
+
+    return torch.export.export(graph_module, tuple(example_inputs_1), dynamic_shapes=dynamic_shapes)
