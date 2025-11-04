@@ -564,6 +564,16 @@ class TFLiteParser:
                 opts = schema_fb.FullyConnectedOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 options['fused_activation_function'] = self._get_activation_name(opts.FusedActivationFunction())
+            elif builtin_code == TFLiteParser.OPCODE_MAP.get("LEAKY_RELU"):
+                opts = schema_fb.LeakyReluOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options['alpha'] = opts.Alpha()
+            elif builtin_code == TFLiteParser.OPCODE_MAP.get("CONV_3D"):
+                opts = schema_fb.Conv3DOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options['padding'] = self._get_padding_name(opts.Padding())
+                options['stride'] = [opts.StrideD(), opts.StrideH(), opts.StrideW()]
+                options['fused_activation_function'] = self._get_activation_name(opts.FusedActivationFunction())
             # Add more operator-specific option parsing as needed
         except Exception as e:
             # If parsing fails, return empty options
