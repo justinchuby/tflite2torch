@@ -218,25 +218,34 @@ class OperatorConverter:
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
-            """Build FX graph from legacy converter info."""
-            from ._fx_reconstructor import FXReconstructor
+            """Build FX graph from legacy converter info.
             
-            # Delegate to _fx_reconstructor's logic for now
-            # This is a temporary bridge during migration
-            reconstructor = FXReconstructor()
-            reconstructor.graph = graph
-            reconstructor.node_counter = node_counter['count']
-            reconstructor.parameter_dict = parameter_dict
+            Note: This is a temporary migration bridge. The circular import
+            (importing FXReconstructor here) is intentional and will be removed
+            once all converters are migrated to the new format. The import is
+            inside the function to avoid issues at module load time.
+            """
+            # Import here to avoid circular dependency at module load time
+            # This is acceptable for legacy support during migration
+            from ._fx_reconstructor import FXReconstructor
             
             # Handle different types of legacy converters
             if conv_info.get("custom", False):
                 # Custom operators were marked for special handling
-                # For now, create a simple pass-through node
-                # (These should all be converted to the new format)
-                output_node = graph.call_function(
-                    lambda x: x,
-                    args=(input_nodes[0],) if input_nodes else ()
+                # These should be converted to the new format to preserve semantics
+                # For now, create a warning pass-through node
+                import warnings
+                module_name = conv_info.get("module", "unknown")
+                warnings.warn(
+                    f"Legacy custom operator '{module_name}' not yet converted to new format. "
+                    f"Using pass-through which may not preserve operator semantics.",
+                    UserWarning
                 )
+                if input_nodes:
+                    output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
+                else:
+                    # No inputs - create a placeholder
+                    output_node = graph.call_function(lambda: None, args=())
                 output_node.name = node_name
             elif isinstance(conv_info.get("module"), type) and issubclass(conv_info["module"], nn.Module):
                 # Module class - create instance and add to graph
@@ -689,16 +698,17 @@ class OperatorConverter:
                         args=(input_node, shape_tuple)
                     )
                 else:
-                    # If shape is not available as constant, use -1 for unknown dimension
-                    output_node = graph.call_function(
-                        torch.reshape,
-                        args=(input_node, (-1,))
+                    # If shape is not available as constant, raise an error
+                    # Flattening to (-1,) would not preserve tensor structure
+                    raise ValueError(
+                        f"RESHAPE operator at {node_name} requires shape tensor as constant weight, "
+                        f"but shape_idx {shape_idx} not found in weights"
                     )
             else:
-                output_node = graph.call_function(
-                    lambda x: x,
-                    args=(input_nodes[0],) if input_nodes else ()
-                )
+                # No valid inputs - should not happen in well-formed model
+                if not input_nodes:
+                    raise ValueError(f"RESHAPE operator at {node_name} requires at least one input tensor")
+                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
             output_node.name = node_name
             return output_node
         return build_graph
