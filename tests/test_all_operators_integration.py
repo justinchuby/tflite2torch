@@ -111,7 +111,27 @@ class TestAllTFLiteOperators:
 
     def test_concatenation_operator(self, tmp_path):
         """Test CONCATENATION operator (OP 2)."""
-        pytest.skip("CONCATENATION requires complex setup - TODO")
+        input1 = tf.keras.layers.Input(shape=(5,))
+        input2 = tf.keras.layers.Input(shape=(5,))
+        output = tf.keras.layers.Concatenate()([input1, input2])
+        model = tf.keras.Model(inputs=[input1, input2], outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "concatenation_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input1_data = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]], dtype=np.float32)
+        input2_data = np.array([[6.0, 7.0, 8.0, 9.0, 10.0]], dtype=np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, [input1_data, input2_data])
+        # Pass inputs in the same order to graph_module
+        torch_output = graph_module(torch.from_numpy(input1_data), torch.from_numpy(input2_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="CONCATENATION")
 
     def test_conv_2d_operator(self, tmp_path):
         """Test CONV_2D operator (OP 3)."""
@@ -205,7 +225,24 @@ class TestAllTFLiteOperators:
 
     def test_max_pool_2d_operator(self, tmp_path):
         """Test MAX_POOL_2D operator (OP 17)."""
-        pytest.skip("MAX_POOL_2D requires complex setup - TODO")
+        input_layer = tf.keras.layers.Input(shape=(8, 8, 1))
+        output = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(input_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output)
+        
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "max_pool_2d_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 8, 8, 1).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="MAX_POOL_2D")
 
     def test_mul_operator(self, tmp_path):
         """Test MUL operator (OP 18)."""
@@ -278,7 +315,25 @@ class TestAllTFLiteOperators:
 
     def test_reshape_operator(self, tmp_path):
         """Test RESHAPE operator (OP 22)."""
-        pytest.skip("RESHAPE requires complex setup - TODO")
+        # Use a concrete function for reshape
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 12], dtype=tf.float32)])
+        def reshape_func(x):
+            return tf.reshape(x, [1, 3, 4])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([reshape_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "reshape_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.arange(12, dtype=np.float32).reshape(1, 12)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="RESHAPE")
 
     def test_resize_bilinear_operator(self, tmp_path):
         """Test RESIZE_BILINEAR operator (OP 23)."""
@@ -380,11 +435,45 @@ class TestAllTFLiteOperators:
 
     def test_transpose_operator(self, tmp_path):
         """Test TRANSPOSE operator (OP 39)."""
-        pytest.skip("TRANSPOSE requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3, 4], dtype=tf.float32)])
+        def transpose_func(x):
+            return tf.transpose(x, perm=[0, 2, 1])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([transpose_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "transpose_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 3, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="TRANSPOSE")
 
     def test_mean_operator(self, tmp_path):
         """Test MEAN operator (OP 40)."""
-        pytest.skip("MEAN requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3, 4], dtype=tf.float32)])
+        def mean_func(x):
+            return tf.reduce_mean(x, axis=[1], keepdims=True)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([mean_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "mean_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 3, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="MEAN")
 
     def test_sub_operator(self, tmp_path):
         """Test SUB operator (OP 41)."""
@@ -434,7 +523,24 @@ class TestAllTFLiteOperators:
 
     def test_squeeze_operator(self, tmp_path):
         """Test SQUEEZE operator (OP 43)."""
-        pytest.skip("SQUEEZE requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 5, 1], dtype=tf.float32)])
+        def squeeze_func(x):
+            return tf.squeeze(x, axis=[2])
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([squeeze_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "squeeze_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 5, 1).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SQUEEZE")
 
     def test_unidirectional_sequence_lstm_operator(self, tmp_path):
         """Test UNIDIRECTIONAL_SEQUENCE_LSTM operator (OP 44)."""
@@ -626,7 +732,24 @@ class TestAllTFLiteOperators:
 
     def test_sum_operator(self, tmp_path):
         """Test SUM operator (OP 74)."""
-        pytest.skip("SUM requires complex setup - TODO")
+        @tf.function(input_signature=[tf.TensorSpec(shape=[1, 3, 4], dtype=tf.float32)])
+        def sum_func(x):
+            return tf.reduce_sum(x, axis=[1], keepdims=True)
+        
+        converter = tf.lite.TFLiteConverter.from_concrete_functions([sum_func.get_concrete_function()])
+        tflite_model = converter.convert()
+        
+        model_path = tmp_path / "sum_model.tflite"
+        with open(model_path, "wb") as f:
+            f.write(tflite_model)
+        
+        graph_module = convert_tflite_to_graph_module(str(model_path))
+        input_data = np.random.randn(1, 3, 4).astype(np.float32)
+        
+        tflite_output = run_tflite_model(tflite_model, input_data)
+        torch_output = graph_module(torch.from_numpy(input_data))
+        
+        assert compare_outputs(tflite_output, torch_output, op_name="SUM")
 
     def test_sqrt_operator(self, tmp_path):
         """Test SQRT operator (OP 75)."""

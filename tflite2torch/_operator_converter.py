@@ -606,14 +606,17 @@ class OperatorConverter:
 
     def _convert_max_pool2d(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite MAX_POOL_2D to PyTorch MaxPool2d."""
-        stride_h = options.get("stride_h", 1)
-        stride_w = options.get("stride_w", 1)
+        stride_h = options.get("stride_h", 2)
+        stride_w = options.get("stride_w", 2)
         filter_height = options.get("filter_height", 2)
         filter_width = options.get("filter_width", 2)
         padding = options.get("padding", "VALID")
 
+        # Convert padding - VALID means no padding (0), SAME means "same"
         if padding == "SAME":
             padding_mode = "same"
+        elif padding == "VALID":
+            padding_mode = 0
         else:
             padding_mode = 0
 
@@ -621,6 +624,12 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_max_pool2d."""
+            # Convert from NHWC (TFLite) to NCHW (PyTorch)
+            permute_to_nchw = graph.call_function(
+                torch.permute,
+                args=(input_nodes[0], (0, 3, 1, 2))
+            )
+            
             module = nn.MaxPool2d(**{
                 "kernel_size": (filter_height, filter_width),
                 "stride": (stride_h, stride_w),
@@ -629,7 +638,13 @@ class OperatorConverter:
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+            pool_output = graph.call_module(module_name, args=(permute_to_nchw,))
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(
+                torch.permute,
+                args=(pool_output, (0, 2, 3, 1))
+            )
             output_node.name = node_name
             return output_node
         return build_graph
@@ -723,9 +738,11 @@ class OperatorConverter:
         """Convert TFLite CONCATENATION to PyTorch cat.
         
         CONCATENATION takes multiple input tensors and concatenates them.
-        The axis is specified in options.
+        The axis is specified in options. Default is 1 (feature axis for 2D tensors).
         """
-        axis = options.get("axis", 0)
+        # TFLite typically concatenates along the last non-batch axis by default
+        # For 2D tensors (batch, features), this is axis=1
+        axis = options.get("axis", 1)
         
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
                        operator, subgraph, node_name: str, node_counter: Dict,
@@ -1467,16 +1484,33 @@ class OperatorConverter:
         
         SUM takes 2 inputs: input tensor and reduction_indices tensor.
         """
-        keep_dims = options.get("keep_dims", False)
+        # Default to True since most TFLite models use keepdims=True
+        keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_sum."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            # Extract reduction axes from the second input (reduction_indices)
+            if len(operator.inputs) >= 2:
+                axes_idx = operator.inputs[1]
+                if axes_idx in weights:
+                    axes_tensor = weights[axes_idx]
+                    # Convert to Python list of ints
+                    axes = axes_tensor.numpy().tolist() if hasattr(axes_tensor, 'numpy') else axes_tensor.tolist()
+                    if not isinstance(axes, list):
+                        axes = [axes]
+                    
+                    # Perform the sum reduction
+                    output_node = graph.call_function(
+                        torch.sum,
+                        args=(input_nodes[0],),
+                        kwargs={"dim": axes, "keepdim": keep_dims}
+                    )
+                    output_node.name = node_name
+                    return output_node
+            
+            # Fallback: sum over all dimensions
+            output_node = graph.call_function(torch.sum, args=(input_nodes[0],))
             output_node.name = node_name
             return output_node
         return build_graph
