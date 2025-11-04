@@ -4,14 +4,12 @@ TFLite execution graph reconstruction in Torch FX.
 This module reconstructs the TFLite computational graph as a PyTorch FX graph
 and creates a torch.export.ExportedProgram.
 """
+from __future__ import annotations
 
-from typing import Dict, List, Any, Optional
 import torch
 import torch.nn as nn
-from torch.fx import Graph, GraphModule, Node
-from torch.fx.node import Argument
 
-from ._parser import SubgraphInfo, TensorInfo, OperatorInfo
+from ._parser import SubgraphInfo, OperatorInfo
 from ._operator_converter import OperatorConverter
 
 
@@ -23,14 +21,14 @@ class FXReconstructor:
     into a PyTorch FX graph that can be executed or exported.
     """
 
-    def __init__(self, operator_converter: Optional[OperatorConverter] = None):
+    def __init__(self, operator_converter: OperatorConverter | None = None):
         self.operator_converter = operator_converter or OperatorConverter()
-        self.graph = Graph()
-        self.tensor_map: Dict[int, Node] = {}
-        self.parameter_dict: Dict[str, torch.Tensor] = {}
+        self.graph = torch.fx.Graph()
+        self.tensor_map: dict[int, torch.fx.Node] = {}
+        self.parameter_dict: dict[str, torch.Tensor] = {}
         self.node_counter = 0
 
-    def reconstruct(self, subgraph: SubgraphInfo, weights: Optional[Dict[int, torch.Tensor]] = None) -> GraphModule:
+    def reconstruct(self, subgraph: SubgraphInfo, weights: dict[int, torch.Tensor] | None = None) -> torch.fx.GraphModule:
         """
         Reconstruct a TFLite subgraph as a PyTorch FX GraphModule.
 
@@ -42,7 +40,7 @@ class FXReconstructor:
             PyTorch FX GraphModule representing the computation
         """
         weights = weights or {}
-        self.graph = Graph()
+        self.graph = torch.fx.Graph()
         self.tensor_map = {}
         self.parameter_dict = {}
         self.node_counter = 0
@@ -68,7 +66,7 @@ class FXReconstructor:
 
         # Create a module to hold the graph
         root_module = self._create_root_module()
-        graph_module = GraphModule(root_module, self.graph)
+        graph_module = torch.fx.GraphModule(root_module, self.graph)
 
         return graph_module
 
@@ -76,12 +74,12 @@ class FXReconstructor:
         self,
         operator: OperatorInfo,
         subgraph: SubgraphInfo,
-        weights: Dict[int, torch.Tensor],
+        weights: dict[int, torch.Tensor],
         op_idx: int,
     ):
         """Process a single operator and add it to the FX graph."""
         op_type = operator.op_type
-        
+
         # Get input nodes
         input_nodes = []
         for input_idx in operator.inputs:
@@ -132,7 +130,7 @@ class FXReconstructor:
         # All conversion logic is now in the converter itself
         node_name = f"{op_type.lower()}_{op_idx}"
         node_counter_dict = {'count': self.node_counter}
-        
+
         output_node = graph_builder(
             self.graph,
             input_nodes,
@@ -143,10 +141,10 @@ class FXReconstructor:
             node_counter_dict,
             self.parameter_dict
         )
-        
+
         # Update node counter
         self.node_counter = node_counter_dict['count']
-        
+
         # Map output tensor indices to the output node
         for output_idx in operator.outputs:
             self.tensor_map[output_idx] = output_node
@@ -173,82 +171,9 @@ class FXReconstructor:
         name = name.replace(":", "_")
         name = name.replace("-", "_")
         name = name.replace(".", "_")
-        
+
         # Ensure it starts with a letter or underscore
         if name and not (name[0].isalpha() or name[0] == "_"):
             name = f"_{name}"
-        
+
         return name or "unnamed"
-
-    def to_exported_program(
-        self,
-        graph_module: GraphModule,
-        example_inputs: Optional[tuple] = None
-    ) -> Optional[Any]:
-        """
-        Convert GraphModule to torch.export.ExportedProgram if available.
-
-        Args:
-            graph_module: FX GraphModule to export
-            example_inputs: Optional tuple of example input tensors.
-                          If not provided, creates dummy tensors (not recommended for production)
-
-        Returns:
-            ExportedProgram if torch.export is available, otherwise None
-        """
-        try:
-            # Try to use torch.export if available (PyTorch 2.0+)
-            if hasattr(torch, "export"):
-                if example_inputs is None:
-                    # Create dummy inputs - this is just for demonstration
-                    # In production, actual input shapes should be provided
-                    example_inputs = []
-                    for node in graph_module.graph.nodes:
-                        if node.op == "placeholder":
-                            # Create a dummy input tensor with generic shape
-                            # TODO: Infer shape from model metadata
-                            example_inputs.append(torch.randn(1, 3, 224, 224))
-                    example_inputs = tuple(example_inputs)
-                
-                if example_inputs:
-                    exported_program = torch.export.export(
-                        graph_module,
-                        example_inputs
-                    )
-                    return exported_program
-        except (AttributeError, Exception) as e:
-            # torch.export might not be available or export might fail
-            print(f"Warning: Could not create ExportedProgram: {e}")
-        
-        return None
-
-    def visualize_graph(self, graph_module: GraphModule) -> str:
-        """
-        Generate a text representation of the FX graph.
-
-        Args:
-            graph_module: FX GraphModule to visualize
-
-        Returns:
-            String representation of the graph
-        """
-        lines = []
-        lines.append("FX Graph:")
-        lines.append("=" * 50)
-        
-        for node in graph_module.graph.nodes:
-            if node.op == "placeholder":
-                lines.append(f"{node.name}: placeholder")
-            elif node.op == "get_attr":
-                lines.append(f"{node.name}: get_attr({node.target})")
-            elif node.op == "call_function":
-                args_str = ", ".join(str(arg.name) if isinstance(arg, Node) else str(arg) for arg in node.args)
-                lines.append(f"{node.name}: {node.target.__name__}({args_str})")
-            elif node.op == "call_module":
-                args_str = ", ".join(str(arg.name) if isinstance(arg, Node) else str(arg) for arg in node.args)
-                lines.append(f"{node.name}: {node.target}({args_str})")
-            elif node.op == "output":
-                lines.append(f"output: {node.args}")
-        
-        lines.append("=" * 50)
-        return "\n".join(lines)

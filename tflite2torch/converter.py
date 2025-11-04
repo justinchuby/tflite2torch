@@ -63,22 +63,22 @@ class TFLiteToTorchConverter:
         # Stage 1: Parse TFLite model
         print(f"Stage 1: Parsing TFLite model from {tflite_model_path}...")
         subgraphs = self.parser.parse(tflite_model_path)
-        
+
         if not subgraphs:
             raise ValueError("No subgraphs found in TFLite model")
-        
+
         if subgraph_index >= len(subgraphs):
             raise ValueError(
                 f"Subgraph index {subgraph_index} out of range. "
                 f"Model has {len(subgraphs)} subgraph(s)."
             )
-        
+
         subgraph = subgraphs[subgraph_index]
         print(f"  Found {len(subgraphs)} subgraph(s)")
         print(f"  Converting subgraph {subgraph_index}: {subgraph.name}")
         print(f"  - {len(subgraph.tensors)} tensors")
         print(f"  - {len(subgraph.operators)} operators")
-        
+
         # Stage 2 & 3: Convert operators and reconstruct FX graph
         print("\nStage 2-3: Converting operators and reconstructing FX graph...")
         # Get weights from parser
@@ -87,21 +87,21 @@ class TFLiteToTorchConverter:
         weights_torch = {idx: torch.from_numpy(weight) for idx, weight in weights_dict.items()}
         graph_module = self.fx_reconstructor.reconstruct(subgraph, weights=weights_torch)
         print("  Graph reconstruction complete")
-        
+
         # Optionally visualize the graph
-        graph_viz = self.fx_reconstructor.visualize_graph(graph_module)
+        graph_viz = str(graph_module.graph)
         print("\n" + graph_viz)
-        
+
         # Stage 4: Render to code (if requested)
         if generate_code:
             print("\nStage 4: Rendering PyTorch code...")
             code = self.code_renderer.render(graph_module, class_name="ConvertedModel")
             print("  Code generation complete")
-            
+
             if output_path:
                 self.code_renderer.save_to_file(code, output_path)
                 print(f"  Saved to {output_path}")
-            
+
             return code
         else:
             return graph_module
@@ -177,7 +177,7 @@ def convert_tflite_to_torch(
     Example:
         >>> # Convert to code
         >>> code = convert_tflite_to_torch("model.tflite")
-        >>> 
+        >>>
         >>> # Convert and save to file
         >>> code = convert_tflite_to_torch("model.tflite", "model.py")
     """
@@ -224,7 +224,6 @@ def convert_tflite_to_graph_module(
 
 def convert_tflite_to_exported_program(
     tflite_model_path: str,
-    example_inputs: Optional[tuple] = None,
     subgraph_index: int = 0,
 ):
     """
@@ -250,10 +249,10 @@ def convert_tflite_to_exported_program(
         >>> # Convert to ExportedProgram with example inputs
         >>> example_inputs = (torch.randn(1, 3, 224, 224),)
         >>> exported = convert_tflite_to_exported_program("model.tflite", example_inputs)
-        >>> 
+        >>>
         >>> # Let it create dummy inputs (not recommended for production)
         >>> exported = convert_tflite_to_exported_program("model.tflite")
-    
+
     Note:
         Requires PyTorch 2.0+ with torch.export support.
     """
@@ -263,5 +262,5 @@ def convert_tflite_to_exported_program(
         generate_code=False,
         subgraph_index=subgraph_index,
     )
-    
+
     return converter.fx_reconstructor.to_exported_program(graph_module, example_inputs)
