@@ -1451,29 +1451,102 @@ class OperatorConverter:
         stride_h = options.get("stride_h", 1)
         stride_w = options.get("stride_w", 1)
         padding = options.get("padding", "SAME")
+        activation = options.get("fused_activation_function", "NONE")
+        
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_transpose_conv."""
-            module = nn.ConvTranspose2d(**{
-                "stride": (stride_h, stride_w),
-                "padding": 0 if padding == "VALID" else "same",
-            })
-            module_name = f"module_{node_counter['count']}"
-            node_counter['count'] += 1
-            parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
-            output_node.name = node_name
-            # Handle fused activation
-            activation = options.get("fused_activation_function", "NONE")
-            if activation != "NONE":
-                activation_module = self.get_activation_module(activation)
-                if activation_module:
-                    act_name = f"activation_{node_counter['count']}"
+            # Extract weight tensor shape to determine conv parameters
+            # TFLite TRANSPOSE_CONV has inputs: output_shape, weights, input, (bias)
+            if len(operator.inputs) >= 2:
+                weight_idx = operator.inputs[1]
+                weight_tensor_info = subgraph.tensors[weight_idx]
+                # TFLite weight format for ConvTranspose: [out_channels, kernel_h, kernel_w, in_channels]
+                if len(weight_tensor_info.shape) == 4:
+                    out_channels = weight_tensor_info.shape[0]
+                    kernel_size = (weight_tensor_info.shape[1], weight_tensor_info.shape[2])
+                    in_channels = weight_tensor_info.shape[3]
+                    
+                    # Check if bias exists (TFLite TRANSPOSE_CONV can have: output_shape, weights, input, bias)
+                    # Typically operator.inputs = [output_shape_idx, weight_idx, input_idx, (optional) bias_idx]
+                    has_bias = len(operator.inputs) >= 4 and operator.inputs[3] >= 0
+                    
+                    # The input tensor is the last element in input_nodes
+                    # (output_shape might be first if it's not in weights, then input)
+                    # But the safest is to use the last one since input is last in operator.inputs
+                    input_tensor = input_nodes[-1] if input_nodes else input_nodes[0]
+                    
+                    # Input is in NHWC format, need to convert to NCHW
+                    permute_to_nchw = graph.call_function(
+                        torch.permute,
+                        args=(input_tensor, (0, 3, 1, 2))
+                    )
+                    
+                    # Create ConvTranspose2d module
+                    # Note: ConvTranspose2d doesn't support "same" padding like Conv2d does
+                    # For SAME padding in transpose conv, we typically use padding=kernel_size//2
+                    if padding == "SAME":
+                        pad_h = kernel_size[0] // 2
+                        pad_w = kernel_size[1] // 2
+                        padding_val = (pad_h, pad_w)
+                    else:  # VALID
+                        padding_val = 0
+                    
+                    params = {
+                        "in_channels": in_channels,
+                        "out_channels": out_channels,
+                        "kernel_size": kernel_size,
+                        "stride": (stride_h, stride_w),
+                        "padding": padding_val,
+                        "bias": has_bias
+                    }
+                    module = nn.ConvTranspose2d(**params)
+                    
+                    # Load weights
+                    if weight_idx in weights:
+                        weight_tensor = weights[weight_idx]
+                        # Convert from TFLite format to PyTorch format
+                        # TFLite: [out_channels, kernel_h, kernel_w, in_channels] = [16, 3, 3, 3]
+                        # PyTorch ConvTranspose2d: [in_channels, out_channels, kernel_h, kernel_w] = [3, 16, 3, 3]
+                        # Permute: (3, 0, 1, 2) to move in_channels from last to first, out_channels from first to second
+                        weight_tensor = weight_tensor.permute(3, 0, 1, 2)
+                        module.weight.data = weight_tensor
+                    
+                    # Load bias if it exists
+                    if has_bias:
+                        bias_idx = operator.inputs[3]
+                        if bias_idx in weights:
+                            module.bias.data = weights[bias_idx]
+                    
+                    module_name = f"module_{node_counter['count']}"
                     node_counter['count'] += 1
-                    parameter_dict[act_name] = activation_module
-                    output_node = graph.call_module(act_name, args=(output_node,))
-                    output_node.name = f"{node_name}_activation"
+                    parameter_dict[module_name] = module
+                    
+                    output_node = graph.call_module(module_name, args=(permute_to_nchw,))
+                    
+                    # Convert back from NCHW to NHWC
+                    output_node = graph.call_function(
+                        torch.permute,
+                        args=(output_node, (0, 2, 3, 1))
+                    )
+                    
+                    # Handle fused activation
+                    if activation != "NONE":
+                        activation_module = self.get_activation_module(activation)
+                        if activation_module:
+                            act_name = f"activation_{node_counter['count']}"
+                            node_counter['count'] += 1
+                            parameter_dict[act_name] = activation_module
+                            output_node = graph.call_module(act_name, args=(output_node,))
+                            output_node.name = f"{node_name}_activation"
+                    else:
+                        output_node.name = node_name
+            else:
+                # Fallback if weight info is not available
+                output_node = input_nodes[0] if input_nodes else graph.call_function(lambda: None, args=())
+                output_node.name = node_name
+            
             return output_node
         return build_graph
 
