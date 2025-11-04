@@ -11,16 +11,14 @@ through a four-stage process:
 
 __version__ = "0.1.0"
 
-from .converter import (
+from ._converter import (
     convert_tflite_to_torch,
     convert_tflite_to_graph_module,
     convert_tflite_to_exported_program,
-    TFLiteToTorchConverter,
 )
 
 __all__ = [
     "convert_tflite_to_torch",
     "convert_tflite_to_graph_module",
     "convert_tflite_to_exported_program",
-    "TFLiteToTorchConverter",
 ]

@@ -14,7 +14,7 @@ from ._operator_converter import OperatorConverter
 from ._fx_reconstructor import FXReconstructor
 
 
-class TFLiteToTorchConverter:
+class _TFLiteToTorchConverter:
     """
     Main converter class for TFLite to PyTorch conversion.
 
@@ -26,15 +26,12 @@ class TFLiteToTorchConverter:
     """
 
     def __init__(self):
+        # The class is created so that we can observe states for debugging
         self.parser = TFLiteParser()
         self.operator_converter = OperatorConverter()
         self.fx_reconstructor = FXReconstructor(self.operator_converter)
 
-    def convert(
-        self,
-        tflite_model_path: str,
-        subgraph_index: int = 0,
-    ) -> GraphModule:
+    def convert(self, tflite_model_path: str, subgraph_index: int = 0) -> GraphModule:
         """
         Convert a TFLite model to PyTorch.
 
@@ -83,33 +80,9 @@ class TFLiteToTorchConverter:
 
         return graph_module
 
-    def convert_and_save(
-        self,
-        tflite_model_path: str,
-        output_path: str,
-        subgraph_index: int = 0,
-    ) -> None:
-        """
-        Convert TFLite model and save the generated code to a file.
-
-        Args:
-            tflite_model_path: Path to the TFLite model file
-            output_path: Path where to save the generated PyTorch code
-            subgraph_index: Index of the subgraph to convert
-
-        Returns:
-            Generated PyTorch code as string
-        """
-        graph_module = self.convert(
-            tflite_model_path=tflite_model_path, subgraph_index=subgraph_index
-        )
-        graph_module.to_folder(output_path)
-
 
 def convert_tflite_to_torch(
-    tflite_model_path: str,
-    output_path: str,
-    subgraph_index: int = 0,
+    tflite_model_path: str, output_path: str, subgraph_index: int = 0
 ) -> None:
     """
     Convert a TFLite model to PyTorch code.
@@ -129,24 +102,19 @@ def convert_tflite_to_torch(
         Generated PyTorch code as string
 
     Example:
-        >>> # Convert to code
-        >>> code = convert_tflite_to_torch("model.tflite")
-        >>>
-        >>> # Convert and save to file
-        >>> code = convert_tflite_to_torch("model.tflite", "model.py")
+        >>> # Convert and save to folder
+        >>> convert_tflite_to_torch("model.tflite", "output_folder")
     """
-    converter = TFLiteToTorchConverter()
-    converter.convert_and_save(
+    converter = _TFLiteToTorchConverter()
+    graph_module = converter.convert(
         tflite_model_path=tflite_model_path,
-        output_path=output_path,
         subgraph_index=subgraph_index,
     )
+    graph_module.to_folder(output_path)
+    print(f"PyTorch model saved to {output_path}")
 
 
-def convert_tflite_to_graph_module(
-    tflite_model_path: str,
-    subgraph_index: int = 0,
-) -> GraphModule:
+def convert_tflite_to_graph_module(tflite_model_path: str, subgraph_index: int = 0) -> GraphModule:
     """
     Convert a TFLite model to PyTorch FX GraphModule.
 
@@ -167,14 +135,11 @@ def convert_tflite_to_graph_module(
         >>> graph_module = convert_tflite_to_graph_module("model.tflite")
         >>> output = graph_module(input_tensor)
     """
-    converter = TFLiteToTorchConverter()
+    converter = _TFLiteToTorchConverter()
     return converter.convert(tflite_model_path=tflite_model_path, subgraph_index=subgraph_index)
 
 
-def convert_tflite_to_exported_program(
-    tflite_model_path: str,
-    subgraph_index: int = 0,
-):
+def convert_tflite_to_exported_program(tflite_model_path: str, subgraph_index: int = 0):
     """
     Convert a TFLite model to torch.export.ExportedProgram.
 
@@ -187,25 +152,18 @@ def convert_tflite_to_exported_program(
 
     Args:
         tflite_model_path: Path to the TFLite model file (.tflite)
-        example_inputs: Tuple of example input tensors for export.
-                       If not provided, creates dummy tensors (not recommended for production)
         subgraph_index: Index of the subgraph to convert (default: 0)
 
     Returns:
         torch.export.ExportedProgram if torch.export is available, otherwise None
 
     Example:
-        >>> # Convert to ExportedProgram with example inputs
-        >>> example_inputs = (torch.randn(1, 3, 224, 224),)
-        >>> exported = convert_tflite_to_exported_program("model.tflite", example_inputs)
-        >>>
-        >>> # Let it create dummy inputs (not recommended for production)
-        >>> exported = convert_tflite_to_exported_program("model.tflite")
+        >>> ep = convert_tflite_to_exported_program("model.tflite")
 
     Note:
         Requires PyTorch 2.7+ with torch.export support.
     """
-    converter = TFLiteToTorchConverter()
+    converter = _TFLiteToTorchConverter()
     graph_module = converter.convert(
         tflite_model_path=tflite_model_path, subgraph_index=subgraph_index
     )
