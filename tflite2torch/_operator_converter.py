@@ -280,6 +280,12 @@ class OperatorConverter:
                     # Check if bias exists
                     has_bias = len(operator.inputs) >= 3 and operator.inputs[2] >= 0
                     
+                    # Convert from NHWC (TFLite) to NCHW (PyTorch)
+                    permute_to_nchw = graph.call_function(
+                        torch.permute,
+                        args=(input_nodes[0], (0, 3, 1, 2))
+                    )
+                    
                     # Create Conv2d module
                     params = {
                         "in_channels": in_channels,
@@ -312,8 +318,14 @@ class OperatorConverter:
                     node_counter['count'] += 1
                     parameter_dict[module_name] = module
                     
-                    # Create call_module node
-                    output_node = graph.call_module(module_name, args=(input_nodes[0],))
+                    # Apply convolution
+                    conv_output = graph.call_module(module_name, args=(permute_to_nchw,))
+                    
+                    # Convert back from NCHW to NHWC
+                    output_node = graph.call_function(
+                        torch.permute,
+                        args=(conv_output, (0, 2, 3, 1))
+                    )
                     output_node.name = node_name
                     
                     # Handle fused activation
@@ -364,6 +376,12 @@ class OperatorConverter:
                     
                     has_bias = len(operator.inputs) >= 3 and operator.inputs[2] >= 0
                     
+                    # Convert from NHWC (TFLite) to NCHW (PyTorch)
+                    permute_to_nchw = graph.call_function(
+                        torch.permute,
+                        args=(input_nodes[0], (0, 3, 1, 2))
+                    )
+                    
                     # Create depthwise Conv2d (groups = in_channels)
                     module = nn.Conv2d(
                         in_channels=in_channels,
@@ -391,7 +409,13 @@ class OperatorConverter:
                     module_name = f"module_{node_counter['count']}"
                     node_counter['count'] += 1
                     parameter_dict[module_name] = module
-                    output_node = graph.call_module(module_name, args=(input_nodes[0],))
+                    conv_output = graph.call_module(module_name, args=(permute_to_nchw,))
+                    
+                    # Convert back from NCHW to NHWC
+                    output_node = graph.call_function(
+                        torch.permute,
+                        args=(conv_output, (0, 2, 3, 1))
+                    )
                     output_node.name = node_name
                     
                     # Handle fused activation
