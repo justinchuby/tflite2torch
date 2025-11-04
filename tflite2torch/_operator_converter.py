@@ -112,6 +112,7 @@ class OperatorConverter:
         self.converters["RESHAPE"] = self._convert_reshape
         self.converters["RESIZE_BILINEAR"] = self._convert_resize_bilinear
         self.converters["RESIZE_NEAREST_NEIGHBOR"] = self._convert_resize_nearest
+        self.converters["REVERSE"] = self._convert_reverse_v2  # REVERSE is same as REVERSE_V2
         self.converters["REVERSE_V2"] = self._convert_reverse_v2
         self.converters["REVERSE_SEQUENCE"] = self._convert_reverse_sequence
         self.converters["SCATTER_ND"] = self._convert_scatter_nd
@@ -125,6 +126,7 @@ class OperatorConverter:
         self.converters["SQUEEZE"] = self._convert_squeeze
         self.converters["STRIDED_SLICE"] = self._convert_strided_slice
         self.converters["TILE"] = self._convert_tile
+        self.converters["TOP_K"] = self._convert_topk_v2  # TOP_K is same as TOPK_V2
         self.converters["TOPK_V2"] = self._convert_topk_v2
         self.converters["TRANSPOSE"] = self._convert_transpose
         self.converters["UNPACK"] = self._convert_unpack
@@ -1028,12 +1030,18 @@ class OperatorConverter:
 
     
     def _convert_add_n(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite ADD_N to PyTorch sum of tensors."""
+        """Convert TFLite ADD_N to PyTorch sum of tensors.
+        
+        ADD_N sums multiple tensors element-wise.
+        We use torch.stack to combine tensors, then sum along the new dimension.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_add_n."""
-            output_node = graph.call_function(torch.sum, args=tuple(input_nodes), kwargs={"dim": 0})
+            # Stack all input tensors along a new dimension, then sum
+            stacked = graph.call_function(torch.stack, args=(input_nodes,))
+            output_node = graph.call_function(torch.sum, args=(stacked,), kwargs={"dim": 0})
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1223,16 +1231,20 @@ class OperatorConverter:
 
     
     def _convert_squared_difference(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SQUARED_DIFFERENCE to PyTorch operations."""
+        """Convert TFLite SQUARED_DIFFERENCE to PyTorch operations.
+        
+        squared_difference(x, y) = (x - y) ** 2
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_squared_difference."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            x = input_nodes[0]
+            y = input_nodes[1]
+            
+            # (x - y) ** 2
+            diff_node = graph.call_function(torch.sub, args=(x, y))
+            output_node = graph.call_function(torch.pow, args=(diff_node, 2))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1255,29 +1267,86 @@ class OperatorConverter:
         """Convert TFLite CONV_3D to PyTorch Conv3d."""
         stride = options.get("stride", [1, 1, 1])
         padding = options.get("padding", "VALID")
+        dilation = options.get("dilation", [1, 1, 1])
+        activation = options.get("fused_activation_function", "NONE")
+        
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_conv3d."""
-            module = nn.Conv3d(**{
-                "stride": stride,
-                "padding": 0 if padding == "VALID" else "same",
-            })
-            module_name = f"module_{node_counter['count']}"
-            node_counter['count'] += 1
-            parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
-            output_node.name = node_name
-            # Handle fused activation
-            activation = options.get("fused_activation_function", "NONE")
-            if activation != "NONE":
-                activation_module = self.get_activation_module(activation)
-                if activation_module:
-                    act_name = f"activation_{node_counter['count']}"
+            # Extract weight tensor shape to determine conv parameters
+            if len(operator.inputs) >= 2:
+                weight_idx = operator.inputs[1]
+                weight_tensor_info = subgraph.tensors[weight_idx]
+                # TFLite weight format: [out_channels, kernel_d, kernel_h, kernel_w, in_channels]
+                if len(weight_tensor_info.shape) == 5:
+                    out_channels = weight_tensor_info.shape[0]
+                    kernel_size = (weight_tensor_info.shape[1], weight_tensor_info.shape[2], weight_tensor_info.shape[3])
+                    in_channels = weight_tensor_info.shape[4]
+                    
+                    # Check if bias exists
+                    has_bias = len(operator.inputs) >= 3 and operator.inputs[2] >= 0
+                    
+                    # Convert from NDHWC (TFLite) to NCDHW (PyTorch)
+                    permute_to_ncdhw = graph.call_function(
+                        torch.permute,
+                        args=(input_nodes[0], (0, 4, 1, 2, 3))
+                    )
+                    
+                    # Create Conv3d module
+                    params = {
+                        "in_channels": in_channels,
+                        "out_channels": out_channels,
+                        "kernel_size": kernel_size,
+                        "stride": tuple(stride) if isinstance(stride, list) else stride,
+                        "padding": 0 if padding == "VALID" else "same",
+                        "dilation": tuple(dilation) if isinstance(dilation, list) else dilation,
+                        "bias": has_bias
+                    }
+                    module = nn.Conv3d(**params)
+                    
+                    # Load weights
+                    if weight_idx in weights:
+                        weight_tensor = weights[weight_idx]
+                        # Convert from TFLite format to PyTorch format
+                        # TFLite: [out_channels, kernel_d, kernel_h, kernel_w, in_channels]
+                        # PyTorch: [out_channels, in_channels, kernel_d, kernel_h, kernel_w]
+                        weight_tensor = weight_tensor.permute(0, 4, 1, 2, 3)
+                        module.weight.data = weight_tensor
+                    
+                    # Load bias if it exists
+                    if has_bias:
+                        bias_idx = operator.inputs[2]
+                        if bias_idx in weights:
+                            module.bias.data = weights[bias_idx]
+                    
+                    module_name = f"module_{node_counter['count']}"
                     node_counter['count'] += 1
-                    parameter_dict[act_name] = activation_module
-                    output_node = graph.call_module(act_name, args=(output_node,))
-                    output_node.name = f"{node_name}_activation"
+                    parameter_dict[module_name] = module
+                    
+                    output_node = graph.call_module(module_name, args=(permute_to_ncdhw,))
+                    
+                    # Convert back from NCDHW to NDHWC
+                    output_node = graph.call_function(
+                        torch.permute,
+                        args=(output_node, (0, 2, 3, 4, 1))
+                    )
+                    
+                    # Handle fused activation
+                    if activation != "NONE":
+                        activation_module = self.get_activation_module(activation)
+                        if activation_module:
+                            act_name = f"activation_{node_counter['count']}"
+                            node_counter['count'] += 1
+                            parameter_dict[act_name] = activation_module
+                            output_node = graph.call_module(act_name, args=(output_node,))
+                            output_node.name = f"{node_name}_activation"
+                    else:
+                        output_node.name = node_name
+            else:
+                # Fallback if weight info is not available
+                output_node = input_nodes[0] if input_nodes else graph.call_function(lambda: None, args=())
+                output_node.name = node_name
             return output_node
         return build_graph
 
@@ -1693,24 +1762,47 @@ class OperatorConverter:
     
     # Additional Shape & Tensor Manipulation
     def _convert_broadcast_args(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite BROADCAST_ARGS to PyTorch broadcast_shapes."""
+        """Convert TFLite BROADCAST_ARGS to PyTorch broadcast_shapes.
+        
+        PyTorch broadcast_shapes requires shapes as tuples, not tensors.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_broadcast_args."""
-            output_node = graph.call_function(torch.broadcast_shapes, args=tuple(input_nodes))
+            shape1_tensor = input_nodes[0]
+            shape2_tensor = input_nodes[1]
+            
+            # Convert shape tensors to tuples
+            shape1_list = graph.call_method("tolist", args=(shape1_tensor,))
+            shape1_tuple = graph.call_function(tuple, args=(shape1_list,))
+            
+            shape2_list = graph.call_method("tolist", args=(shape2_tensor,))
+            shape2_tuple = graph.call_function(tuple, args=(shape2_list,))
+            
+            output_node = graph.call_function(torch.broadcast_shapes, args=(shape1_tuple, shape2_tuple))
             output_node.name = node_name
             return output_node
         return build_graph
 
     
     def _convert_broadcast_to(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite BROADCAST_TO to PyTorch broadcast_to."""
+        """Convert TFLite BROADCAST_TO to PyTorch broadcast_to.
+        
+        PyTorch broadcast_to requires size as tuple of ints, not a tensor.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_broadcast_to."""
-            output_node = graph.call_function(torch.broadcast_to, args=tuple(input_nodes))
+            input_tensor = input_nodes[0]
+            shape_tensor = input_nodes[1]
+            
+            # Convert shape tensor to tuple
+            tolist_node = graph.call_method("tolist", args=(shape_tensor,))
+            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            
+            output_node = graph.call_function(torch.broadcast_to, args=(input_tensor, tuple_node))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1758,29 +1850,52 @@ class OperatorConverter:
 
     
     def _convert_gather_nd(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite GATHER_ND to PyTorch operations."""
+        """Convert TFLite GATHER_ND to PyTorch operations.
+        
+        gather_nd gathers slices from params according to indices.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_gather_nd."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            params = input_nodes[0]
+            indices = input_nodes[1]
+            
+            # Custom gather_nd implementation
+            def gather_nd_impl(params, indices):
+                # indices shape: [..., N] where N is the number of indexed dimensions
+                # Convert multi-dimensional indices to access params
+                indices_list = indices.unbind(-1)
+                return params[tuple(indices_list)]
+            
+            output_node = graph.call_function(gather_nd_impl, args=(params, indices))
             output_node.name = node_name
             return output_node
         return build_graph
 
     
     def _convert_mirror_pad(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite MIRROR_PAD to PyTorch pad with reflect mode."""
+        """Convert TFLite MIRROR_PAD to PyTorch pad with reflect mode.
+        
+        PyTorch pad requires pad to be a tuple of ints, not a tensor.
+        We need to convert the padding tensor to a tuple at runtime.
+        """
         mode = options.get("mode", "REFLECT")
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_mirror_pad."""
-            output_node = graph.call_function(torch.nn.functional.pad, args=tuple(input_nodes), kwargs={"mode": "reflect"})
+            input_tensor = input_nodes[0]
+            pad_tensor = input_nodes[1]
+            
+            # Convert pad tensor to tuple - flatten and convert to list
+            # TFLite pad format is [[pad_before_dim_n, pad_after_dim_n], ...] 
+            # PyTorch pad format is (left, right, top, bottom, front, back)
+            flatten_node = graph.call_method("flatten", args=(pad_tensor,))
+            tolist_node = graph.call_method("tolist", args=(flatten_node,))
+            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            
+            output_node = graph.call_function(torch.nn.functional.pad, args=(input_tensor, tuple_node), kwargs={"mode": "reflect"})
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1832,40 +1947,107 @@ class OperatorConverter:
 
     
     def _convert_reverse_v2(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite REVERSE_V2 to PyTorch flip."""
+        """Convert TFLite REVERSE_V2 to PyTorch flip.
+        
+        PyTorch flip requires dims as tuple of ints, not a tensor.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_reverse_v2."""
-            output_node = graph.call_function(torch.flip, args=tuple(input_nodes))
+            input_tensor = input_nodes[0]
+            axis_tensor = input_nodes[1]
+            
+            # Convert axis tensor to tuple
+            tolist_node = graph.call_method("tolist", args=(axis_tensor,))
+            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            
+            output_node = graph.call_function(torch.flip, args=(input_tensor, tuple_node))
             output_node.name = node_name
             return output_node
         return build_graph
 
     
     def _convert_reverse_sequence(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite REVERSE_SEQUENCE to PyTorch operations."""
+        """Convert TFLite REVERSE_SEQUENCE to PyTorch operations.
+        
+        Reverses variable length slices along a specified dimension.
+        """
+        seq_axis = options.get("seq_dim", 1)
+        batch_axis = options.get("batch_dim", 0)
+        
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_reverse_sequence."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            x = input_nodes[0]
+            seq_lengths = input_nodes[1]
+            
+            # Custom reverse_sequence implementation
+            def reverse_sequence_impl(x, seq_lengths, seq_axis=seq_axis, batch_axis=batch_axis):
+                output = x.clone()
+                batch_size = x.shape[batch_axis]
+                
+                for i in range(batch_size):
+                    seq_len = seq_lengths[i].item()
+                    # Get the slice for this batch element
+                    if batch_axis == 0:
+                        if seq_axis == 1:
+                            # Reverse the first seq_len elements along axis 1
+                            output[i, :seq_len] = torch.flip(x[i, :seq_len], dims=[0])
+                        else:
+                            indices = [slice(None)] * x.ndim
+                            indices[batch_axis] = i
+                            indices[seq_axis] = slice(0, seq_len)
+                            output[tuple(indices)] = torch.flip(x[tuple(indices)], dims=[seq_axis])
+                    else:
+                        indices = [slice(None)] * x.ndim
+                        indices[batch_axis] = i
+                        indices[seq_axis] = slice(0, seq_len)
+                        output[tuple(indices)] = torch.flip(x[tuple(indices)], dims=[seq_axis])
+                
+                return output
+            
+            output_node = graph.call_function(reverse_sequence_impl, args=(x, seq_lengths))
             output_node.name = node_name
             return output_node
         return build_graph
 
     
     def _convert_scatter_nd(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SCATTER_ND to PyTorch scatter."""
+        """Convert TFLite SCATTER_ND to PyTorch operations.
+        
+        TFLite SCATTER_ND: indices, updates, shape
+        Creates a tensor of given shape and scatters updates at indices.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_scatter_nd."""
-            output_node = graph.call_function(torch.scatter, args=tuple(input_nodes))
+            indices = input_nodes[0]
+            updates = input_nodes[1]
+            shape = input_nodes[2]
+            
+            # Custom scatter_nd implementation
+            def scatter_nd_impl(indices, updates, shape):
+                # Convert shape to list if it's a tensor
+                if torch.is_tensor(shape):
+                    shape_list = shape.tolist()
+                else:
+                    shape_list = list(shape)
+                
+                # Create output tensor filled with zeros
+                output = torch.zeros(shape_list, dtype=updates.dtype, device=updates.device)
+                
+                # Scatter updates at indices
+                # indices shape: [..., N] where N is the rank of the indexed dimensions
+                # Convert multi-dimensional indices to linear indices for advanced indexing
+                indices_list = indices.unbind(-1)
+                output[tuple(indices_list)] = updates
+                
+                return output
+            
+            output_node = graph.call_function(scatter_nd_impl, args=(indices, updates, shape))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1933,12 +2115,23 @@ class OperatorConverter:
 
     
     def _convert_split_v(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SPLIT_V to PyTorch split."""
+        """Convert TFLite SPLIT_V to PyTorch split.
+        
+        TFLite SPLIT_V: input, size_splits, axis
+        PyTorch split requires split_sizes as tuple/list of ints.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_split_v."""
-            output_node = graph.call_function(torch.split, args=tuple(input_nodes))
+            input_tensor = input_nodes[0]
+            size_splits = input_nodes[1]
+            axis = input_nodes[2]
+            
+            # Convert size_splits tensor to tuple
+            tolist_node = graph.call_method("tolist", args=(size_splits,))
+            
+            output_node = graph.call_function(torch.split, args=(input_tensor, tolist_node, axis))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2182,12 +2375,40 @@ class OperatorConverter:
 
     
     def _convert_one_hot(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite ONE_HOT to PyTorch one_hot."""
+        """Convert TFLite ONE_HOT to PyTorch one_hot.
+        
+        TFLite ONE_HOT takes 4 inputs: indices, depth, on_value, off_value
+        PyTorch one_hot only takes indices and num_classes.
+        We use the first two inputs and scale/shift the result if needed.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_one_hot."""
-            output_node = graph.call_function(torch.nn.functional.one_hot, args=tuple(input_nodes))
+            # PyTorch one_hot only takes (indices, num_classes)
+            # and requires indices to be of type long
+            indices = input_nodes[0]
+            indices_long = graph.call_method("long", args=(indices,))
+            depth = input_nodes[1] if len(input_nodes) > 1 else None
+            
+            if depth is not None:
+                # Call one_hot with indices and depth
+                output_node = graph.call_function(torch.nn.functional.one_hot, args=(indices_long, depth))
+            else:
+                output_node = graph.call_function(torch.nn.functional.one_hot, args=(indices_long,))
+            
+            # Handle on_value and off_value if provided
+            if len(input_nodes) > 2:
+                on_value = input_nodes[2]
+                off_value = input_nodes[3] if len(input_nodes) > 3 else None
+                
+                if off_value is not None:
+                    # Scale: multiply by (on_value - off_value) and add off_value
+                    # result = one_hot * (on_value - off_value) + off_value
+                    diff_node = graph.call_function(torch.sub, args=(on_value, off_value))
+                    scaled_node = graph.call_function(torch.mul, args=(output_node, diff_node))
+                    output_node = graph.call_function(torch.add, args=(scaled_node, off_value))
+            
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2447,32 +2668,59 @@ class OperatorConverter:
 
     
     def _convert_matrix_set_diag(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite MATRIX_SET_DIAG to custom implementation."""
+        """Convert TFLite MATRIX_SET_DIAG to custom implementation.
+        
+        Sets the diagonal of a matrix to a given vector.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_matrix_set_diag."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            matrix = input_nodes[0]
+            diagonal = input_nodes[1]
+            
+            # Custom matrix_set_diag implementation
+            def matrix_set_diag_impl(matrix, diagonal):
+                output = matrix.clone()
+                # Set diagonal using torch's diagonal functionality
+                output.diagonal().copy_(diagonal)
+                return output
+            
+            output_node = graph.call_function(matrix_set_diag_impl, args=(matrix, diagonal))
             output_node.name = node_name
             return output_node
         return build_graph
 
     
     def _convert_segment_sum(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
-        """Convert TFLite SEGMENT_SUM to PyTorch segment operations."""
+        """Convert TFLite SEGMENT_SUM to PyTorch segment operations.
+        
+        Computes the sum along segments of a tensor.
+        """
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_segment_sum."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            data = input_nodes[0]
+            segment_ids = input_nodes[1]
+            
+            # Custom segment_sum implementation
+            def segment_sum_impl(data, segment_ids):
+                # Get number of segments
+                num_segments = segment_ids.max().item() + 1
+                
+                # Create output tensor
+                output_shape = [num_segments] + list(data.shape[1:])
+                output = torch.zeros(output_shape, dtype=data.dtype, device=data.device)
+                
+                # Sum data into segments
+                for i in range(num_segments):
+                    mask = segment_ids == i
+                    output[i] = data[mask].sum(dim=0)
+                
+                return output
+            
+            output_node = graph.call_function(segment_sum_impl, args=(data, segment_ids))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -2493,11 +2741,25 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_rfft2d."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
+            signal = input_nodes[0]
+            
+            # If fft_length is provided, extract it; otherwise use None
+            if len(input_nodes) > 1:
+                fft_length = input_nodes[1]
+                
+                # Custom rfft2d implementation with fft_length
+                def rfft2d_with_length(signal, fft_length):
+                    if torch.is_tensor(fft_length):
+                        s = tuple(fft_length.tolist())
+                    else:
+                        s = fft_length
+                    return torch.fft.rfft2(signal, s=s)
+                
+                output_node = graph.call_function(rfft2d_with_length, args=(signal, fft_length))
             else:
-                output_node = graph.call_function(lambda: None, args=())
+                # No fft_length provided
+                output_node = graph.call_function(torch.fft.rfft2, args=(signal,))
+            
             output_node.name = node_name
             return output_node
         return build_graph
