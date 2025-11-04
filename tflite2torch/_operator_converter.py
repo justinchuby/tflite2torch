@@ -47,6 +47,7 @@ class OperatorConverter:
         self.converters["MAXIMUM"] = self._convert_maximum
         self.converters["MINIMUM"] = self._convert_minimum
         self.converters["MUL"] = self._convert_mul
+        self.converters["ATAN2"] = self._convert_atan2
         self.converters["NEG"] = self._convert_neg
         self.converters["POW"] = self._convert_pow
         self.converters["RSQRT"] = self._convert_rsqrt
@@ -606,14 +607,18 @@ class OperatorConverter:
 
     def _convert_max_pool2d(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite MAX_POOL_2D to PyTorch MaxPool2d."""
-        stride_h = options.get("stride_h", 1)
-        stride_w = options.get("stride_w", 1)
+        # Default stride of 2 is typical for pooling operations in TFLite
+        stride_h = options.get("stride_h", 2)
+        stride_w = options.get("stride_w", 2)
         filter_height = options.get("filter_height", 2)
         filter_width = options.get("filter_width", 2)
         padding = options.get("padding", "VALID")
 
+        # Convert padding - VALID means no padding (0), SAME means "same"
         if padding == "SAME":
             padding_mode = "same"
+        elif padding == "VALID":
+            padding_mode = 0
         else:
             padding_mode = 0
 
@@ -621,6 +626,12 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_max_pool2d."""
+            # Convert from NHWC (TFLite) to NCHW (PyTorch)
+            permute_to_nchw = graph.call_function(
+                torch.permute,
+                args=(input_nodes[0], (0, 3, 1, 2))
+            )
+            
             module = nn.MaxPool2d(**{
                 "kernel_size": (filter_height, filter_width),
                 "stride": (stride_h, stride_w),
@@ -629,7 +640,13 @@ class OperatorConverter:
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+            pool_output = graph.call_module(module_name, args=(permute_to_nchw,))
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(
+                torch.permute,
+                args=(pool_output, (0, 2, 3, 1))
+            )
             output_node.name = node_name
             return output_node
         return build_graph
@@ -637,14 +654,17 @@ class OperatorConverter:
 
     def _convert_avg_pool2d(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite AVERAGE_POOL_2D to PyTorch AvgPool2d."""
-        stride_h = options.get("stride_h", 1)
-        stride_w = options.get("stride_w", 1)
+        stride_h = options.get("stride_h", 2)
+        stride_w = options.get("stride_w", 2)
         filter_height = options.get("filter_height", 2)
         filter_width = options.get("filter_width", 2)
         padding = options.get("padding", "VALID")
 
+        # Convert padding - VALID means no padding (0), SAME means "same"
         if padding == "SAME":
             padding_mode = "same"
+        elif padding == "VALID":
+            padding_mode = 0
         else:
             padding_mode = 0
 
@@ -652,6 +672,12 @@ class OperatorConverter:
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_avg_pool2d."""
+            # Convert from NHWC (TFLite) to NCHW (PyTorch)
+            permute_to_nchw = graph.call_function(
+                torch.permute,
+                args=(input_nodes[0], (0, 3, 1, 2))
+            )
+            
             module = nn.AvgPool2d(**{
                 "kernel_size": (filter_height, filter_width),
                 "stride": (stride_h, stride_w),
@@ -660,7 +686,13 @@ class OperatorConverter:
             module_name = f"module_{node_counter['count']}"
             node_counter['count'] += 1
             parameter_dict[module_name] = module
-            output_node = graph.call_module(module_name, args=(input_nodes[0],) if input_nodes else ())
+            pool_output = graph.call_module(module_name, args=(permute_to_nchw,))
+            
+            # Convert back from NCHW to NHWC
+            output_node = graph.call_function(
+                torch.permute,
+                args=(pool_output, (0, 2, 3, 1))
+            )
             output_node.name = node_name
             return output_node
         return build_graph
@@ -708,9 +740,11 @@ class OperatorConverter:
         """Convert TFLite CONCATENATION to PyTorch cat.
         
         CONCATENATION takes multiple input tensors and concatenates them.
-        The axis is specified in options.
+        The axis is specified in options. Default is 1 (feature axis for 2D tensors).
         """
-        axis = options.get("axis", 0)
+        # TFLite typically concatenates along the last non-batch axis by default
+        # For 2D tensors (batch, features), this is axis=1
+        axis = options.get("axis", 1)
         
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict, 
                        operator, subgraph, node_name: str, node_counter: Dict,
@@ -1112,6 +1146,21 @@ class OperatorConverter:
         return build_graph
 
     
+    def _convert_atan2(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
+        """Convert TFLite ATAN2 to PyTorch atan2."""
+        def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
+                       operator, subgraph, node_name: str, node_counter: Dict,
+                       parameter_dict: Dict) -> Node:
+            """Build FX graph for _convert_atan2."""
+            # atan2(y, x) requires exactly two inputs
+            if len(input_nodes) < 2:
+                raise ValueError(f"ATAN2 requires 2 inputs, got {len(input_nodes)}")
+            output_node = graph.call_function(torch.atan2, args=(input_nodes[0], input_nodes[1]))
+            output_node.name = node_name
+            return output_node
+        return build_graph
+
+    
     def _convert_rsqrt(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite RSQRT to PyTorch rsqrt."""
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
@@ -1386,16 +1435,40 @@ class OperatorConverter:
         
         REDUCE_MAX takes 2 inputs: input tensor and reduction_indices tensor.
         """
-        keep_dims = options.get("keep_dims", False)
+        keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_reduce_max."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            # Extract reduction axes from the second input
+            if len(operator.inputs) >= 2:
+                axes_idx = operator.inputs[1]
+                if axes_idx in weights:
+                    axes_tensor = weights[axes_idx]
+                    try:
+                        if hasattr(axes_tensor, 'numpy'):
+                            axes = axes_tensor.numpy().tolist()
+                        elif hasattr(axes_tensor, 'tolist'):
+                            axes = axes_tensor.tolist()
+                        else:
+                            axes = list(axes_tensor)
+                    except (AttributeError, TypeError) as e:
+                        raise ValueError(f"Cannot convert axes tensor to list: {e}")
+                    
+                    if not isinstance(axes, list):
+                        axes = [axes]
+                    
+                    # PyTorch amax supports multiple dimensions
+                    output_node = graph.call_function(
+                        torch.amax,
+                        args=(input_nodes[0],),
+                        kwargs={"dim": axes, "keepdim": keep_dims}
+                    )
+                    output_node.name = node_name
+                    return output_node
+            
+            # Fallback: max over all dimensions
+            output_node = graph.call_function(torch.max, args=(input_nodes[0],))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1406,16 +1479,40 @@ class OperatorConverter:
         
         REDUCE_MIN takes 2 inputs: input tensor and reduction_indices tensor.
         """
-        keep_dims = options.get("keep_dims", False)
+        keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_reduce_min."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            # Extract reduction axes from the second input
+            if len(operator.inputs) >= 2:
+                axes_idx = operator.inputs[1]
+                if axes_idx in weights:
+                    axes_tensor = weights[axes_idx]
+                    try:
+                        if hasattr(axes_tensor, 'numpy'):
+                            axes = axes_tensor.numpy().tolist()
+                        elif hasattr(axes_tensor, 'tolist'):
+                            axes = axes_tensor.tolist()
+                        else:
+                            axes = list(axes_tensor)
+                    except (AttributeError, TypeError) as e:
+                        raise ValueError(f"Cannot convert axes tensor to list: {e}")
+                    
+                    if not isinstance(axes, list):
+                        axes = [axes]
+                    
+                    # PyTorch amin supports multiple dimensions
+                    output_node = graph.call_function(
+                        torch.amin,
+                        args=(input_nodes[0],),
+                        kwargs={"dim": axes, "keepdim": keep_dims}
+                    )
+                    output_node.name = node_name
+                    return output_node
+            
+            # Fallback: min over all dimensions
+            output_node = graph.call_function(torch.min, args=(input_nodes[0],))
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1423,12 +1520,50 @@ class OperatorConverter:
     
     def _convert_reduce_prod(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite REDUCE_PROD to PyTorch prod."""
-        keep_dims = options.get("keep_dims", False)
+        keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_reduce_prod."""
-            output_node = graph.call_function(torch.prod, args=tuple(input_nodes), kwargs={"keepdim": keep_dims})
+            # Extract reduction axes from the second input
+            if len(operator.inputs) >= 2:
+                axes_idx = operator.inputs[1]
+                if axes_idx in weights:
+                    axes_tensor = weights[axes_idx]
+                    try:
+                        if hasattr(axes_tensor, 'numpy'):
+                            axes = axes_tensor.numpy().tolist()
+                        elif hasattr(axes_tensor, 'tolist'):
+                            axes = axes_tensor.tolist()
+                        else:
+                            axes = list(axes_tensor)
+                    except (AttributeError, TypeError) as e:
+                        raise ValueError(f"Cannot convert axes tensor to list: {e}")
+                    
+                    if not isinstance(axes, list):
+                        axes = [axes]
+                    
+                    # For multiple axes, need to iterate
+                    if len(axes) == 1:
+                        output_node = graph.call_function(
+                            torch.prod,
+                            args=(input_nodes[0],),
+                            kwargs={"dim": axes[0], "keepdim": keep_dims}
+                        )
+                    else:
+                        # Reduce over multiple dimensions sequentially
+                        output_node = input_nodes[0]
+                        for axis in sorted(axes, reverse=True):
+                            output_node = graph.call_function(
+                                torch.prod,
+                                args=(output_node,),
+                                kwargs={"dim": axis, "keepdim": keep_dims}
+                            )
+                    output_node.name = node_name
+                    return output_node
+            
+            # Fallback
+            output_node = graph.call_function(torch.prod, args=(input_nodes[0],), kwargs={"keepdim": keep_dims})
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1436,12 +1571,50 @@ class OperatorConverter:
     
     def _convert_reduce_any(self, inputs: List[Any], options: Dict[str, Any]) -> Callable:
         """Convert TFLite REDUCE_ANY to PyTorch any."""
-        keep_dims = options.get("keep_dims", False)
+        keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_reduce_any."""
-            output_node = graph.call_function(torch.any, args=tuple(input_nodes), kwargs={"keepdim": keep_dims})
+            # Extract reduction axes from the second input
+            if len(operator.inputs) >= 2:
+                axes_idx = operator.inputs[1]
+                if axes_idx in weights:
+                    axes_tensor = weights[axes_idx]
+                    try:
+                        if hasattr(axes_tensor, 'numpy'):
+                            axes = axes_tensor.numpy().tolist()
+                        elif hasattr(axes_tensor, 'tolist'):
+                            axes = axes_tensor.tolist()
+                        else:
+                            axes = list(axes_tensor)
+                    except (AttributeError, TypeError) as e:
+                        raise ValueError(f"Cannot convert axes tensor to list: {e}")
+                    
+                    if not isinstance(axes, list):
+                        axes = [axes]
+                    
+                    # For single axis
+                    if len(axes) == 1:
+                        output_node = graph.call_function(
+                            torch.any,
+                            args=(input_nodes[0],),
+                            kwargs={"dim": axes[0], "keepdim": keep_dims}
+                        )
+                    else:
+                        # Multiple axes: reduce sequentially
+                        output_node = input_nodes[0]
+                        for axis in sorted(axes, reverse=True):
+                            output_node = graph.call_function(
+                                torch.any,
+                                args=(output_node,),
+                                kwargs={"dim": axis, "keepdim": keep_dims}
+                            )
+                    output_node.name = node_name
+                    return output_node
+            
+            # Fallback
+            output_node = graph.call_function(torch.any, args=(input_nodes[0],), kwargs={"keepdim": keep_dims})
             output_node.name = node_name
             return output_node
         return build_graph
@@ -1452,16 +1625,42 @@ class OperatorConverter:
         
         SUM takes 2 inputs: input tensor and reduction_indices tensor.
         """
-        keep_dims = options.get("keep_dims", False)
+        # Default to True for compatibility with typical TFLite reduction operations
+        keep_dims = options.get("keep_dims", True)
         def build_graph(graph: Graph, input_nodes: List[Node], weights: Dict,
                        operator, subgraph, node_name: str, node_counter: Dict,
                        parameter_dict: Dict) -> Node:
             """Build FX graph for _convert_sum."""
-            # TODO: Implement custom operator logic
-            if input_nodes:
-                output_node = graph.call_function(lambda x: x, args=(input_nodes[0],))
-            else:
-                output_node = graph.call_function(lambda: None, args=())
+            # Extract reduction axes from the second input (reduction_indices)
+            if len(operator.inputs) >= 2:
+                axes_idx = operator.inputs[1]
+                if axes_idx in weights:
+                    axes_tensor = weights[axes_idx]
+                    # Convert to Python list of ints
+                    try:
+                        if hasattr(axes_tensor, 'numpy'):
+                            axes = axes_tensor.numpy().tolist()
+                        elif hasattr(axes_tensor, 'tolist'):
+                            axes = axes_tensor.tolist()
+                        else:
+                            axes = list(axes_tensor)
+                    except (AttributeError, TypeError) as e:
+                        raise ValueError(f"Cannot convert axes tensor to list: {e}")
+                    
+                    if not isinstance(axes, list):
+                        axes = [axes]
+                    
+                    # Perform the sum reduction
+                    output_node = graph.call_function(
+                        torch.sum,
+                        args=(input_nodes[0],),
+                        kwargs={"dim": axes, "keepdim": keep_dims}
+                    )
+                    output_node.name = node_name
+                    return output_node
+            
+            # Fallback: sum over all dimensions
+            output_node = graph.call_function(torch.sum, args=(input_nodes[0],))
             output_node.name = node_name
             return output_node
         return build_graph
