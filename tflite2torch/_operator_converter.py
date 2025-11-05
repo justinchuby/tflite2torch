@@ -952,12 +952,15 @@ class OperatorConverter:
                     shape_tuple = tuple(shape_tensor.tolist())
                     output_node = graph.call_function(torch.reshape, args=(input_node, shape_tuple))
                 else:
-                    # If shape is not available as constant, raise an error
-                    # Flattening to (-1,) would not preserve tensor structure
-                    raise ValueError(
-                        f"RESHAPE operator at {node_name} requires shape tensor as constant weight, "
-                        f"but shape_idx {shape_idx} not found in weights"
-                    )
+                    # If shape is not available as constant, try to infer from output tensor shape
+                    # This handles dynamic reshapes like Flatten operations
+                    output_idx = operator.outputs[0]
+                    output_tensor = subgraph.tensors[output_idx]
+                    output_shape = output_tensor.shape
+                    
+                    # Convert output shape to tuple, keeping -1 for dynamic dimensions
+                    shape_tuple = tuple(output_shape)
+                    output_node = graph.call_function(torch.reshape, args=(input_node, shape_tuple))
             else:
                 # No valid inputs - should not happen in well-formed model
                 if not input_nodes:
@@ -3190,6 +3193,11 @@ class OperatorConverter:
                     if strides is not None and torch.is_tensor(strides)
                     else ([1] * len(begin_list) if strides is None else strides)
                 )
+
+                # Ensure all values are integers (convert from float if needed)
+                begin_list = [int(b) if not isinstance(b, list) else int(b[0]) for b in (begin_list if isinstance(begin_list, list) else [begin_list])]
+                end_list = [int(e) if not isinstance(e, list) else int(e[0]) for e in (end_list if isinstance(end_list, list) else [end_list])]
+                stride_list = [int(s) if not isinstance(s, list) else int(s[0]) for s in (stride_list if isinstance(stride_list, list) else [stride_list])]
 
                 # Build slice objects for each dimension
                 slices = []

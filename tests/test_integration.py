@@ -43,6 +43,10 @@ def run_tflite_model(tflite_model, input_data):
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     
+    # Resize tensors if needed to match input batch size
+    interpreter.resize_tensor_input(input_details[0]['index'], input_data.shape)
+    interpreter.allocate_tensors()
+    
     # Set input
     interpreter.set_tensor(input_details[0]['index'], input_data.astype(np.float32))
     
