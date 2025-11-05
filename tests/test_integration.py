@@ -1,6 +1,5 @@
 """Integration tests comparing TFLite model outputs with converted PyTorch outputs."""
 
-import pytest
 import numpy as np
 import torch
 import tensorflow as tf

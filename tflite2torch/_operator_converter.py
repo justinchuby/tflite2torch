@@ -2788,7 +2788,6 @@ class OperatorConverter:
         TFLite format: [[pad_before_dim_0, pad_after_dim_0], [pad_before_dim_1, pad_after_dim_1], ...]
         PyTorch format: (left, right, top, bottom, front, back, ...) - reversed and flattened
         """
-        mode = options.get("mode", "REFLECT")
 
         def build_graph(
             graph: Graph,
@@ -2836,7 +2835,6 @@ class OperatorConverter:
         PACK takes multiple input tensors and stacks them along a new dimension.
         PyTorch stack expects tensors as a sequence (tuple/list).
         """
-        axis = options.get("axis", 0)
 
         def build_graph(
             graph: Graph,
