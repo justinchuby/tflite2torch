@@ -232,8 +232,8 @@ def convert_tflite_to_exported_program(tflite_model_path: str, subgraph_index: i
         example_inputs_2.append(example_input_2)
 
     dynamic_shapes = torch.export.AdditionalInputs()
-    dynamic_shapes.add(tuple(example_inputs_1))
-    dynamic_shapes.add(tuple(example_inputs_2))
+    dynamic_shapes.add(*example_inputs_1)
+    dynamic_shapes.add(*example_inputs_2)
 
     # Convert TFLite model to GraphModule
     graph_module = converter.convert(
