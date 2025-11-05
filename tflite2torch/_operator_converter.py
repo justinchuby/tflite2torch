@@ -12,6 +12,43 @@ import torch.nn as nn
 from torch.fx import Graph, Node
 
 
+def calc_same_padding(x, kernel_h, kernel_w, stride_h, stride_w, dilation_h=1, dilation_w=1):
+    """
+    Calculate TFLite-style SAME padding dynamically based on input shape.
+
+    TFLite SAME padding ensures output_size = ceil(input_size / stride).
+
+    Args:
+        x: Input tensor with shape [N, C, H, W]
+        kernel_h: Kernel height
+        kernel_w: Kernel width
+        stride_h: Stride in height dimension
+        stride_w: Stride in width dimension
+        dilation_h: Dilation in height dimension (default: 1)
+        dilation_w: Dilation in width dimension (default: 1)
+
+    Returns:
+        Padded tensor
+    """
+    _, _, h, w = x.shape
+    # Effective kernel size with dilation
+    eff_kernel_h = (kernel_h - 1) * dilation_h + 1
+    eff_kernel_w = (kernel_w - 1) * dilation_w + 1
+    # Calculate output size (TFLite SAME padding)
+    out_h = (h + stride_h - 1) // stride_h
+    out_w = (w + stride_w - 1) // stride_w
+    # Calculate total padding needed
+    pad_h = max((out_h - 1) * stride_h + eff_kernel_h - h, 0)
+    pad_w = max((out_w - 1) * stride_w + eff_kernel_w - w, 0)
+    # Split padding (TFLite pads more on right/bottom when odd)
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+    # Apply padding (left, right, top, bottom)
+    return torch.nn.functional.pad(x, (pad_left, pad_right, pad_top, pad_bottom))
+
+
 class OperatorConverter:
     """
     Converts TFLite operators to PyTorch equivalents.
@@ -279,8 +316,12 @@ class OperatorConverter:
         dilation_w = options.get("dilation_w_factor", 1)
         activation = options.get("fused_activation_function", "NONE")
 
+        # Determine if we need manual padding for SAME mode with strided convolutions
+        # PyTorch doesn't support padding='same' with stride != 1
+        use_manual_padding = padding == "SAME" and (stride_h != 1 or stride_w != 1)
+
         # Convert padding from TFLite to PyTorch format
-        if padding == "SAME":
+        if padding == "SAME" and not use_manual_padding:
             padding_mode = "same"
         elif padding == "VALID":
             padding_mode = 0
@@ -316,6 +357,23 @@ class OperatorConverter:
                         torch.permute, args=(input_nodes[0], (0, 3, 1, 2))
                     )
 
+                    # Add manual padding if needed for SAME padding with stride != 1
+                    conv_input = permute_to_nchw
+                    if use_manual_padding:
+                        # Apply TFLite-style SAME padding
+                        conv_input = graph.call_function(
+                            calc_same_padding,
+                            args=(
+                                permute_to_nchw,
+                                kernel_size[0],
+                                kernel_size[1],
+                                stride_h,
+                                stride_w,
+                                dilation_h,
+                                dilation_w,
+                            ),
+                        )
+
                     # Create Conv2d module
                     params = {
                         "in_channels": in_channels,
@@ -349,7 +407,7 @@ class OperatorConverter:
                     parameter_dict[module_name] = module
 
                     # Apply convolution
-                    conv_output = graph.call_module(module_name, args=(permute_to_nchw,))
+                    conv_output = graph.call_module(module_name, args=(conv_input,))
 
                     # Convert back from NCHW to NHWC
                     output_node = graph.call_function(
@@ -382,7 +440,11 @@ class OperatorConverter:
         depth_multiplier = options.get("depth_multiplier", 1)
         activation = options.get("fused_activation_function", "NONE")
 
-        if padding == "SAME":
+        # Determine if we need manual padding for SAME mode with strided convolutions
+        # PyTorch doesn't support padding='same' with stride != 1
+        use_manual_padding = padding == "SAME" and (stride_h != 1 or stride_w != 1)
+
+        if padding == "SAME" and not use_manual_padding:
             padding_mode = "same"
         else:
             padding_mode = 0
@@ -415,6 +477,24 @@ class OperatorConverter:
                         torch.permute, args=(input_nodes[0], (0, 3, 1, 2))
                     )
 
+                    # Add manual padding if needed for SAME padding with stride != 1
+                    conv_input = permute_to_nchw
+                    if use_manual_padding:
+                        # Apply TFLite-style SAME padding
+                        # Note: depthwise conv typically doesn't use dilation, defaulting to 1
+                        conv_input = graph.call_function(
+                            calc_same_padding,
+                            args=(
+                                permute_to_nchw,
+                                kernel_size[0],
+                                kernel_size[1],
+                                stride_h,
+                                stride_w,
+                                1,  # dilation_h
+                                1,  # dilation_w
+                            ),
+                        )
+
                     # Create depthwise Conv2d (groups = in_channels)
                     module = nn.Conv2d(
                         in_channels=in_channels,
@@ -442,7 +522,7 @@ class OperatorConverter:
                     module_name = f"module_{node_counter['count']}"
                     node_counter["count"] += 1
                     parameter_dict[module_name] = module
-                    conv_output = graph.call_module(module_name, args=(permute_to_nchw,))
+                    conv_output = graph.call_module(module_name, args=(conv_input,))
 
                     # Convert back from NCHW to NHWC
                     output_node = graph.call_function(
