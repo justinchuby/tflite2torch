@@ -1006,13 +1006,166 @@ class TFLiteParser:
                 if not opts.BoundariesIsNone():
                     options["boundaries"] = [opts.Boundaries(i) for i in range(opts.BoundariesLength())]
                     
-            # Operators with schemas that are not yet implemented:
-            # ABS, ADD_N, BATCH_TO_SPACE_ND, BROADCAST_TO, COS, DEQUANTIZE, EQUAL, EXP,
-            # EXPAND_DIMS, FILL, FLOOR_DIV, FLOOR_MOD, GATHER_ND, GREATER, GREATER_EQUAL,
-            # HARD_SWISH, LESS, LESS_EQUAL, MATRIX_DIAG, MATRIX_SET_DIAG, NEG, NOT_EQUAL,
-            # PAD, PADV2, QUANTIZE, RANGE, RANK, REVERSE_V2, RFFT2D, SCATTER_ND, SEGMENT_SUM,
-            # SELECT, SELECT_V2, SLICE, SPACE_TO_BATCH_ND, SQUARE, SQUARED_DIFFERENCE, TILE,
-            # WHERE, ZEROS_LIKE
+            # Operators with empty schemas (no fields to parse)
+            elif op_name == "ABS":
+                opts = schema_fb.AbsOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "ADD_N":
+                opts = schema_fb.AddNOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "BATCH_TO_SPACE_ND":
+                opts = schema_fb.BatchToSpaceNDOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "BROADCAST_TO":
+                opts = schema_fb.BroadcastToOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "COS":
+                opts = schema_fb.CosOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "DEQUANTIZE":
+                opts = schema_fb.DequantizeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "EQUAL":
+                opts = schema_fb.EqualOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "EXP":
+                opts = schema_fb.ExpOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "EXPAND_DIMS":
+                opts = schema_fb.ExpandDimsOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "FILL":
+                opts = schema_fb.FillOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "FLOOR_DIV":
+                opts = schema_fb.FloorDivOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "FLOOR_MOD":
+                opts = schema_fb.FloorModOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "GATHER_ND":
+                opts = schema_fb.GatherNdOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "GREATER":
+                opts = schema_fb.GreaterOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "GREATER_EQUAL":
+                opts = schema_fb.GreaterEqualOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "HARD_SWISH":
+                opts = schema_fb.HardSwishOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "LESS":
+                opts = schema_fb.LessOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "LESS_EQUAL":
+                opts = schema_fb.LessEqualOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "MATRIX_DIAG":
+                opts = schema_fb.MatrixDiagOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "MATRIX_SET_DIAG":
+                opts = schema_fb.MatrixSetDiagOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "NEG":
+                opts = schema_fb.NegOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "NOT_EQUAL":
+                opts = schema_fb.NotEqualOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "PAD":
+                opts = schema_fb.PadOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "PADV2":
+                opts = schema_fb.PadV2Options()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "QUANTIZE":
+                opts = schema_fb.QuantizeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "RANGE":
+                opts = schema_fb.RangeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "RANK":
+                opts = schema_fb.RankOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "REVERSE_V2":
+                opts = schema_fb.ReverseV2Options()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "RFFT2D":
+                opts = schema_fb.Rfft2dOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SCATTER_ND":
+                opts = schema_fb.ScatterNdOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SEGMENT_SUM":
+                opts = schema_fb.SegmentSumOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SELECT":
+                opts = schema_fb.SelectOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SELECT_V2":
+                opts = schema_fb.SelectV2Options()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SLICE":
+                opts = schema_fb.SliceOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SQUARE":
+                opts = schema_fb.SquareOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SQUARED_DIFFERENCE":
+                opts = schema_fb.SquaredDifferenceOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "TILE":
+                opts = schema_fb.TileOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "WHERE":
+                opts = schema_fb.WhereOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "ZEROS_LIKE":
+                opts = schema_fb.ZerosLikeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
+            elif op_name == "SPACE_TO_BATCH_ND":
+                opts = schema_fb.SpaceToBatchNDOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
             
             # Operators without option schemas (no options defined in schema.fbs):
             # ELU, FLOOR, LOG, LOGISTIC, PRELU, RELU, RELU6, ROUND, RSQRT, SIN, SQRT, TANH
