@@ -949,15 +949,20 @@ class OperatorConverter:
                 shape_idx = operator.inputs[1]
                 if shape_idx in weights:
                     shape_tensor = weights[shape_idx]
-                    shape_tuple = tuple(shape_tensor.tolist())
+                    # Convert to list and ensure all values are integers
+                    shape_list = shape_tensor.tolist()
+                    shape_tuple = tuple(int(s) for s in shape_list)
                     output_node = graph.call_function(torch.reshape, args=(input_node, shape_tuple))
                 else:
-                    # If shape is not available as constant, raise an error
-                    # Flattening to (-1,) would not preserve tensor structure
-                    raise ValueError(
-                        f"RESHAPE operator at {node_name} requires shape tensor as constant weight, "
-                        f"but shape_idx {shape_idx} not found in weights"
-                    )
+                    # If shape is not available as constant, try to infer from output tensor shape
+                    # This handles dynamic reshapes like Flatten operations
+                    output_idx = operator.outputs[0]
+                    output_tensor = subgraph.tensors[output_idx]
+                    output_shape = output_tensor.shape
+                    
+                    # Convert output shape to tuple, keeping -1 for dynamic dimensions
+                    shape_tuple = tuple(int(s) for s in output_shape)
+                    output_node = graph.call_function(torch.reshape, args=(input_node, shape_tuple))
             else:
                 # No valid inputs - should not happen in well-formed model
                 if not input_nodes:
@@ -1025,7 +1030,9 @@ class OperatorConverter:
                 perm_idx = operator.inputs[1]
                 if perm_idx in weights:
                     perm_tensor = weights[perm_idx]
-                    perm_tuple = tuple(perm_tensor.tolist())
+                    # Convert to list and ensure all values are integers
+                    perm_list = perm_tensor.tolist()
+                    perm_tuple = tuple(int(p) for p in perm_list)
                     output_node = graph.call_function(torch.permute, args=(input_node, perm_tuple))
                 else:
                     # If perm is not available, pass through
@@ -1075,9 +1082,11 @@ class OperatorConverter:
                     axis_tensor = weights[axis_idx]
                     axis_list = axis_tensor.tolist()
                     if isinstance(axis_list, list):
+                        # Convert to integers
+                        axis_list = [int(a) for a in axis_list]
                         axis = tuple(axis_list) if len(axis_list) > 1 else axis_list[0]
                     else:
-                        axis = axis_list
+                        axis = int(axis_list)
 
                     output_node = graph.call_function(
                         torch.mean, args=(input_node,), kwargs={"dim": axis, "keepdim": keep_dims}
@@ -1123,7 +1132,8 @@ class OperatorConverter:
                 pad_list = []
                 ndim = pad_tensor.shape[0]
                 for i in range(ndim - 1, -1, -1):
-                    pad_list.extend([pad_tensor[i, 0].item(), pad_tensor[i, 1].item()])
+                    # Ensure values are integers
+                    pad_list.extend([int(pad_tensor[i, 0].item()), int(pad_tensor[i, 1].item())])
 
                 # Skip leading zero paddings
                 while len(pad_list) > 0 and pad_list[-2] == 0 and pad_list[-1] == 0:
@@ -1176,7 +1186,16 @@ class OperatorConverter:
             parameter_dict: dict,
         ) -> Node:
             """Build FX graph for _convert_expand_dims."""
-            output_node = graph.call_function(torch.unsqueeze, args=tuple(input_nodes))
+            # unsqueeze needs the dim argument to be an integer
+            input_tensor = input_nodes[0]
+            dim = input_nodes[1] if len(input_nodes) > 1 else 0
+            
+            # Create a wrapper to convert dim to int if it's a tensor
+            def unsqueeze_impl(tensor, dim):
+                dim_int = int(dim.item() if torch.is_tensor(dim) else dim)
+                return torch.unsqueeze(tensor, dim_int)
+            
+            output_node = graph.call_function(unsqueeze_impl, args=(input_tensor, dim))
             output_node.name = node_name
             return output_node
 
@@ -1209,6 +1228,10 @@ class OperatorConverter:
                 # Convert tensors to lists
                 begin_list = begin.tolist() if torch.is_tensor(begin) else begin
                 size_list = size.tolist() if torch.is_tensor(size) else size
+
+                # Ensure all values are integers
+                begin_list = [int(b) for b in begin_list]
+                size_list = [int(s) for s in size_list]
 
                 # Build slice objects for each dimension
                 slices = []
@@ -1276,9 +1299,9 @@ class OperatorConverter:
 
             # Calculate split size from tensor shape and num_splits
             def split_impl(input_tensor, axis, num_splits):
-                dim_size = input_tensor.shape[axis.item() if torch.is_tensor(axis) else axis]
+                axis_val = int(axis.item() if torch.is_tensor(axis) else axis)
+                dim_size = input_tensor.shape[axis_val]
                 split_size = dim_size // num_splits
-                axis_val = axis.item() if torch.is_tensor(axis) else axis
                 return torch.split(input_tensor, split_size, dim=axis_val)
 
             output_node = graph.call_function(split_impl, args=(input_tensor, axis, num_splits))
@@ -2311,13 +2334,19 @@ class OperatorConverter:
                         raise ValueError(f"Cannot convert axes tensor to list: {e}")
 
                     if not isinstance(axes, list):
-                        axes = [axes]
+                        axes = [int(axes)]
+                    else:
+                        # Ensure all values are integers
+                        axes = [int(a) for a in axes]
+                    
+                    # Convert to tuple if multiple axes, or single int if one axis  
+                    axes_arg = tuple(axes) if len(axes) > 1 else axes[0]
 
                     # PyTorch amax supports multiple dimensions
                     output_node = graph.call_function(
                         torch.amax,
                         args=(input_nodes[0],),
-                        kwargs={"dim": axes, "keepdim": keep_dims},
+                        kwargs={"dim": axes_arg, "keepdim": keep_dims},
                     )
                     output_node.name = node_name
                     return output_node
@@ -2363,13 +2392,19 @@ class OperatorConverter:
                         raise ValueError(f"Cannot convert axes tensor to list: {e}")
 
                     if not isinstance(axes, list):
-                        axes = [axes]
+                        axes = [int(axes)]
+                    else:
+                        # Ensure all values are integers
+                        axes = [int(a) for a in axes]
+                    
+                    # Convert to tuple if multiple axes, or single int if one axis  
+                    axes_arg = tuple(axes) if len(axes) > 1 else axes[0]
 
                     # PyTorch amin supports multiple dimensions
                     output_node = graph.call_function(
                         torch.amin,
                         args=(input_nodes[0],),
-                        kwargs={"dim": axes, "keepdim": keep_dims},
+                        kwargs={"dim": axes_arg, "keepdim": keep_dims},
                     )
                     output_node.name = node_name
                     return output_node
@@ -2412,14 +2447,17 @@ class OperatorConverter:
                         raise ValueError(f"Cannot convert axes tensor to list: {e}")
 
                     if not isinstance(axes, list):
-                        axes = [axes]
+                        axes = [int(axes)]
+                    else:
+                        # Ensure all values are integers
+                        axes = [int(a) for a in axes]
 
                     # For multiple axes, need to iterate
                     if len(axes) == 1:
                         output_node = graph.call_function(
                             torch.prod,
                             args=(input_nodes[0],),
-                            kwargs={"dim": axes[0], "keepdim": keep_dims},
+                            kwargs={"dim": int(axes[0]), "keepdim": keep_dims},
                         )
                     else:
                         # Reduce over multiple dimensions sequentially
@@ -2473,14 +2511,17 @@ class OperatorConverter:
                         raise ValueError(f"Cannot convert axes tensor to list: {e}")
 
                     if not isinstance(axes, list):
-                        axes = [axes]
+                        axes = [int(axes)]
+                    else:
+                        # Ensure all values are integers
+                        axes = [int(a) for a in axes]
 
                     # For single axis
                     if len(axes) == 1:
                         output_node = graph.call_function(
                             torch.any,
                             args=(input_nodes[0],),
-                            kwargs={"dim": axes[0], "keepdim": keep_dims},
+                            kwargs={"dim": int(axes[0]), "keepdim": keep_dims},
                         )
                     else:
                         # Multiple axes: reduce sequentially
@@ -2539,13 +2580,19 @@ class OperatorConverter:
                         raise ValueError(f"Cannot convert axes tensor to list: {e}")
 
                     if not isinstance(axes, list):
-                        axes = [axes]
+                        axes = [int(axes)]
+                    else:
+                        # Ensure all values are integers
+                        axes = [int(a) for a in axes]
+                    
+                    # Convert to tuple if multiple axes, or single int if one axis
+                    axes_arg = tuple(axes) if len(axes) > 1 else axes[0]
 
                     # Perform the sum reduction
                     output_node = graph.call_function(
                         torch.sum,
                         args=(input_nodes[0],),
-                        kwargs={"dim": axes, "keepdim": keep_dims},
+                        kwargs={"dim": axes_arg, "keepdim": keep_dims},
                     )
                     output_node.name = node_name
                     return output_node
@@ -2613,9 +2660,11 @@ class OperatorConverter:
             input_tensor = input_nodes[0]
             shape_tensor = input_nodes[1]
 
-            # Convert shape tensor to tuple
-            tolist_node = graph.call_method("tolist", args=(shape_tensor,))
-            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            # Convert shape tensor to tuple of ints
+            def to_int_tuple(tensor):
+                return tuple(int(x) for x in tensor.tolist())
+            
+            tuple_node = graph.call_function(to_int_tuple, args=(shape_tensor,))
 
             output_node = graph.call_function(torch.broadcast_to, args=(input_tensor, tuple_node))
             output_node.name = node_name
@@ -2739,7 +2788,6 @@ class OperatorConverter:
         TFLite format: [[pad_before_dim_0, pad_after_dim_0], [pad_before_dim_1, pad_after_dim_1], ...]
         PyTorch format: (left, right, top, bottom, front, back, ...) - reversed and flattened
         """
-        mode = options.get("mode", "REFLECT")
 
         def build_graph(
             graph: Graph,
@@ -2763,7 +2811,8 @@ class OperatorConverter:
                 pad_list = []
                 ndim = pad_tensor.shape[0]
                 for i in range(ndim - 1, -1, -1):
-                    pad_list.extend([pad_tensor[i, 0].item(), pad_tensor[i, 1].item()])
+                    # Ensure values are integers
+                    pad_list.extend([int(pad_tensor[i, 0].item()), int(pad_tensor[i, 1].item())])
 
                 # PyTorch pad only supports padding last 2 or 3 dimensions for 4D input
                 # Skip leading zero paddings
@@ -2786,7 +2835,6 @@ class OperatorConverter:
         PACK takes multiple input tensors and stacks them along a new dimension.
         PyTorch stack expects tensors as a sequence (tuple/list).
         """
-        axis = options.get("axis", 0)
 
         def build_graph(
             graph: Graph,
@@ -2932,9 +2980,11 @@ class OperatorConverter:
             input_tensor = input_nodes[0]
             axis_tensor = input_nodes[1]
 
-            # Convert axis tensor to tuple
-            tolist_node = graph.call_method("tolist", args=(axis_tensor,))
-            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            # Convert axis tensor to tuple of ints
+            def to_int_tuple(tensor):
+                return tuple(int(x) for x in tensor.tolist())
+            
+            tuple_node = graph.call_function(to_int_tuple, args=(axis_tensor,))
 
             output_node = graph.call_function(torch.flip, args=(input_tensor, tuple_node))
             output_node.name = node_name
@@ -3149,10 +3199,17 @@ class OperatorConverter:
             size_splits = input_nodes[1]
             axis = input_nodes[2]
 
-            # Convert size_splits tensor to tuple
-            tolist_node = graph.call_method("tolist", args=(size_splits,))
+            # Convert size_splits tensor to tuple of ints and axis to int
+            def to_int_tuple(tensor):
+                return tuple(int(x) for x in tensor.tolist())
+            
+            def to_int(tensor):
+                return int(tensor.item() if torch.is_tensor(tensor) else tensor)
+            
+            tolist_node = graph.call_function(to_int_tuple, args=(size_splits,))
+            axis_node = graph.call_function(to_int, args=(axis,))
 
-            output_node = graph.call_function(torch.split, args=(input_tensor, tolist_node, axis))
+            output_node = graph.call_function(torch.split, args=(input_tensor, tolist_node, axis_node))
             output_node.name = node_name
             return output_node
 
@@ -3190,6 +3247,11 @@ class OperatorConverter:
                     if strides is not None and torch.is_tensor(strides)
                     else ([1] * len(begin_list) if strides is None else strides)
                 )
+
+                # Ensure all values are integers (convert from float if needed)
+                begin_list = [int(b) if not isinstance(b, list) else int(b[0]) for b in (begin_list if isinstance(begin_list, list) else [begin_list])]
+                end_list = [int(e) if not isinstance(e, list) else int(e[0]) for e in (end_list if isinstance(end_list, list) else [end_list])]
+                stride_list = [int(s) if not isinstance(s, list) else int(s[0]) for s in (stride_list if isinstance(stride_list, list) else [stride_list])]
 
                 # Build slice objects for each dimension
                 slices = []
@@ -3231,9 +3293,11 @@ class OperatorConverter:
             input_tensor = input_nodes[0]
             multiples_tensor = input_nodes[1]
 
-            # Convert multiples tensor to tuple
-            tolist_node = graph.call_method("tolist", args=(multiples_tensor,))
-            tuple_node = graph.call_function(tuple, args=(tolist_node,))
+            # Convert multiples tensor to tuple of ints
+            def to_int_tuple(tensor):
+                return tuple(int(x) for x in tensor.tolist())
+            
+            tuple_node = graph.call_function(to_int_tuple, args=(multiples_tensor,))
 
             output_node = graph.call_function(torch.tile, args=(input_tensor, tuple_node))
             output_node.name = node_name
@@ -3569,7 +3633,20 @@ class OperatorConverter:
             parameter_dict: dict,
         ) -> Node:
             """Build FX graph for _convert_arg_max."""
-            output_node = graph.call_function(torch.argmax, args=tuple(input_nodes))
+            # argmax needs dim to be an int
+            input_tensor = input_nodes[0]
+            dim = input_nodes[1] if len(input_nodes) > 1 else None
+            
+            if dim is not None:
+                # Create a wrapper to convert dim to int if it's a tensor
+                def argmax_impl(tensor, dim):
+                    dim_int = int(dim.item() if torch.is_tensor(dim) else dim)
+                    return torch.argmax(tensor, dim=dim_int)
+                
+                output_node = graph.call_function(argmax_impl, args=(input_tensor, dim))
+            else:
+                output_node = graph.call_function(torch.argmax, args=(input_tensor,))
+            
             output_node.name = node_name
             return output_node
 
@@ -3589,7 +3666,20 @@ class OperatorConverter:
             parameter_dict: dict,
         ) -> Node:
             """Build FX graph for _convert_arg_min."""
-            output_node = graph.call_function(torch.argmin, args=tuple(input_nodes))
+            # argmin needs dim to be an int
+            input_tensor = input_nodes[0]
+            dim = input_nodes[1] if len(input_nodes) > 1 else None
+            
+            if dim is not None:
+                # Create a wrapper to convert dim to int if it's a tensor
+                def argmin_impl(tensor, dim):
+                    dim_int = int(dim.item() if torch.is_tensor(dim) else dim)
+                    return torch.argmin(tensor, dim=dim_int)
+                
+                output_node = graph.call_function(argmin_impl, args=(input_tensor, dim))
+            else:
+                output_node = graph.call_function(torch.argmin, args=(input_tensor,))
+            
             output_node.name = node_name
             return output_node
 
@@ -4067,7 +4157,16 @@ class OperatorConverter:
             parameter_dict: dict,
         ) -> Node:
             """Build FX graph for _convert_cumsum."""
-            output_node = graph.call_function(torch.cumsum, args=tuple(input_nodes))
+            # cumsum needs dim to be an int
+            input_tensor = input_nodes[0]
+            dim = input_nodes[1] if len(input_nodes) > 1 else 0
+            
+            # Create a wrapper to convert dim to int if it's a tensor
+            def cumsum_impl(tensor, dim):
+                dim_int = int(dim.item() if torch.is_tensor(dim) else dim)
+                return torch.cumsum(tensor, dim=dim_int)
+            
+            output_node = graph.call_function(cumsum_impl, args=(input_tensor, dim))
             output_node.name = node_name
             return output_node
 

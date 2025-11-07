@@ -576,7 +576,7 @@ class TFLiteParser:
                     opts.FusedActivationFunction()
                 )
             # Add more operator-specific option parsing as needed
-        except Exception as e:
+        except Exception:
             # If parsing fails, return empty options
             pass
 

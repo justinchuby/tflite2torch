@@ -1,9 +1,7 @@
 """Tests for operator converter module."""
 
 import pytest
-import torch
 import torch.nn as nn
-from torch.fx import Graph
 from tflite2torch._operator_converter import OperatorConverter
 
 
