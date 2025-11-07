@@ -41,6 +41,9 @@ class CodeRenderer:
         lines.append("import torch.nn as nn")
         lines.append("import torch.nn.functional as F")
         lines.append("")
+        lines.append("# Import TFLite operators to register custom ops")
+        lines.append("import tflite2torch.ops  # noqa: F401")
+        lines.append("")
         lines.append("")
 
         # Start class definition
