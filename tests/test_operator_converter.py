@@ -20,7 +20,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "CONV_2D",
             inputs=[0, 1, 2],
-            options={
+            builtin_options={
                 "stride_h": 1,
                 "stride_w": 1,
                 "padding": "SAME",
@@ -36,20 +36,20 @@ class TestOperatorConverter:
         result = converter.convert(
             "FULLY_CONNECTED",
             inputs=[0, 1],
-            options={}
+            builtin_options={}
         )
         assert callable(result)
 
     def test_convert_relu(self):
         """Test RELU conversion returns a callable."""
         converter = OperatorConverter()
-        result = converter.convert("RELU", inputs=[0], options={})
+        result = converter.convert("RELU", inputs=[0], builtin_options={})
         assert callable(result)
 
     def test_convert_add(self):
         """Test ADD conversion returns a callable."""
         converter = OperatorConverter()
-        result = converter.convert("ADD", inputs=[0, 1], options={})
+        result = converter.convert("ADD", inputs=[0, 1], builtin_options={})
         assert callable(result)
 
     def test_convert_max_pool2d(self):
@@ -58,7 +58,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "MAX_POOL_2D",
             inputs=[0],
-            options={
+            builtin_options={
                 "stride_h": 2,
                 "stride_w": 2,
                 "filter_height": 2,
@@ -71,13 +71,13 @@ class TestOperatorConverter:
     def test_convert_softmax(self):
         """Test SOFTMAX conversion returns a callable."""
         converter = OperatorConverter()
-        result = converter.convert("SOFTMAX", inputs=[0], options={})
+        result = converter.convert("SOFTMAX", inputs=[0], builtin_options={})
         assert callable(result)
 
     def test_convert_reshape(self):
         """Test RESHAPE conversion returns a callable."""
         converter = OperatorConverter()
-        result = converter.convert("RESHAPE", inputs=[0, 1], options={})
+        result = converter.convert("RESHAPE", inputs=[0, 1], builtin_options={})
         assert callable(result)
 
     def test_convert_concatenation(self):
@@ -86,7 +86,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "CONCATENATION",
             inputs=[0, 1],
-            options={"axis": 1}
+            builtin_options={"axis": 1}
         )
         assert callable(result)
 
@@ -94,7 +94,7 @@ class TestOperatorConverter:
         """Test conversion of unsupported operator."""
         converter = OperatorConverter()
         with pytest.raises(NotImplementedError):
-            converter.convert("UNSUPPORTED_OP", inputs=[], options={})
+            converter.convert("UNSUPPORTED_OP", inputs=[], builtin_options={})
 
     def test_get_activation_module_relu(self):
         """Test RELU activation - now handled via fused_activation_function in ops."""
@@ -123,7 +123,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "DEPTHWISE_CONV_2D",
             inputs=[0, 1],
-            options={
+            builtin_options={
                 "stride_h": 1,
                 "stride_w": 1,
                 "padding": "SAME"
@@ -134,7 +134,7 @@ class TestOperatorConverter:
     def test_convert_transpose(self):
         """Test TRANSPOSE conversion returns a callable."""
         converter = OperatorConverter()
-        result = converter.convert("TRANSPOSE", inputs=[0, 1], options={})
+        result = converter.convert("TRANSPOSE", inputs=[0, 1], builtin_options={})
         assert callable(result)
 
     def test_convert_mean(self):
@@ -143,135 +143,135 @@ class TestOperatorConverter:
         result = converter.convert(
             "MEAN",
             inputs=[0, 1],
-            options={"keep_dims": True}
+            builtin_options={"keep_dims": True}
         )
         assert callable(result)
 
     def test_convert_mul(self):
         """Test MUL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("MUL", inputs=[0, 1], options={})
+        result = converter.convert("MUL", inputs=[0, 1], builtin_options={})
         assert callable(result)
 
     def test_convert_sub(self):
         """Test SUB conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SUB", inputs=[0, 1], options={})
+        result = converter.convert("SUB", inputs=[0, 1], builtin_options={})
         assert callable(result)
 
     def test_convert_div(self):
         """Test DIV conversion."""
         converter = OperatorConverter()
-        result = converter.convert("DIV", inputs=[0, 1], options={})
+        result = converter.convert("DIV", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     # Arithmetic & Math Operations Tests
     def test_convert_abs(self):
         """Test ABS conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ABS", inputs=[0], options={})
+        result = converter.convert("ABS", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_add_n(self):
         """Test ADD_N conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ADD_N", inputs=[0, 1, 2], options={})
+        result = converter.convert("ADD_N", inputs=[0, 1, 2], builtin_options={})
         assert callable(result)
     
     def test_convert_ceil(self):
         """Test CEIL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("CEIL", inputs=[0], options={})
+        result = converter.convert("CEIL", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_cos(self):
         """Test COS conversion."""
         converter = OperatorConverter()
-        result = converter.convert("COS", inputs=[0], options={})
+        result = converter.convert("COS", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_exp(self):
         """Test EXP conversion."""
         converter = OperatorConverter()
-        result = converter.convert("EXP", inputs=[0], options={})
+        result = converter.convert("EXP", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_floor(self):
         """Test FLOOR conversion."""
         converter = OperatorConverter()
-        result = converter.convert("FLOOR", inputs=[0], options={})
+        result = converter.convert("FLOOR", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_floor_div(self):
         """Test FLOOR_DIV conversion."""
         converter = OperatorConverter()
-        result = converter.convert("FLOOR_DIV", inputs=[0, 1], options={})
+        result = converter.convert("FLOOR_DIV", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_floor_mod(self):
         """Test FLOOR_MOD conversion."""
         converter = OperatorConverter()
-        result = converter.convert("FLOOR_MOD", inputs=[0, 1], options={})
+        result = converter.convert("FLOOR_MOD", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_log(self):
         """Test LOG conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOG", inputs=[0], options={})
+        result = converter.convert("LOG", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_maximum(self):
         """Test MAXIMUM conversion."""
         converter = OperatorConverter()
-        result = converter.convert("MAXIMUM", inputs=[0, 1], options={})
+        result = converter.convert("MAXIMUM", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_minimum(self):
         """Test MINIMUM conversion."""
         converter = OperatorConverter()
-        result = converter.convert("MINIMUM", inputs=[0, 1], options={})
+        result = converter.convert("MINIMUM", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_neg(self):
         """Test NEG conversion."""
         converter = OperatorConverter()
-        result = converter.convert("NEG", inputs=[0], options={})
+        result = converter.convert("NEG", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_pow(self):
         """Test POW conversion."""
         converter = OperatorConverter()
-        result = converter.convert("POW", inputs=[0, 1], options={})
+        result = converter.convert("POW", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_rsqrt(self):
         """Test RSQRT conversion."""
         converter = OperatorConverter()
-        result = converter.convert("RSQRT", inputs=[0], options={})
+        result = converter.convert("RSQRT", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_sin(self):
         """Test SIN conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SIN", inputs=[0], options={})
+        result = converter.convert("SIN", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_sqrt(self):
         """Test SQRT conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SQRT", inputs=[0], options={})
+        result = converter.convert("SQRT", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_square(self):
         """Test SQUARE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SQUARE", inputs=[0], options={})
+        result = converter.convert("SQUARE", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_squared_difference(self):
         """Test SQUARED_DIFFERENCE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SQUARED_DIFFERENCE", inputs=[0, 1], options={})
+        result = converter.convert("SQUARED_DIFFERENCE", inputs=[0, 1], builtin_options={})
         # Should return a lambda or custom function
         assert callable(result)
     
@@ -282,7 +282,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "AVERAGE_POOL_2D",
             inputs=[0],
-            options={
+            builtin_options={
                 "stride_h": 2,
                 "stride_w": 2,
                 "filter_height": 2,
@@ -298,7 +298,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "CONV_3D",
             inputs=[0, 1, 2],
-            options={
+            builtin_options={
                 "stride_d": 1,
                 "stride_h": 1,
                 "stride_w": 1,
@@ -313,33 +313,33 @@ class TestOperatorConverter:
         result = converter.convert(
             "TRANSPOSE_CONV",
             inputs=[0, 1],
-            options={}
+            builtin_options={}
         )
         assert callable(result)
     
     def test_convert_batch_matmul(self):
         """Test BATCH_MATMUL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("BATCH_MATMUL", inputs=[0, 1], options={})
+        result = converter.convert("BATCH_MATMUL", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     # Activation Functions Tests
     def test_convert_elu(self):
         """Test ELU conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ELU", inputs=[0], options={})
+        result = converter.convert("ELU", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_gelu(self):
         """Test GELU conversion."""
         converter = OperatorConverter()
-        result = converter.convert("GELU", inputs=[0], options={})
+        result = converter.convert("GELU", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_hard_swish(self):
         """Test HARD_SWISH conversion."""
         converter = OperatorConverter()
-        result = converter.convert("HARD_SWISH", inputs=[0], options={})
+        result = converter.convert("HARD_SWISH", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_leaky_relu(self):
@@ -348,51 +348,51 @@ class TestOperatorConverter:
         result = converter.convert(
             "LEAKY_RELU",
             inputs=[0],
-            options={"alpha": 0.1}
+            builtin_options={"alpha": 0.1}
         )
         assert callable(result)
     
     def test_convert_logistic(self):
         """Test LOGISTIC (Sigmoid) conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOGISTIC", inputs=[0], options={})
+        result = converter.convert("LOGISTIC", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_log_softmax(self):
         """Test LOG_SOFTMAX conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOG_SOFTMAX", inputs=[0], options={})
+        result = converter.convert("LOG_SOFTMAX", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_prelu(self):
         """Test PRELU conversion."""
         converter = OperatorConverter()
-        result = converter.convert("PRELU", inputs=[0, 1], options={})
+        result = converter.convert("PRELU", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_relu6(self):
         """Test RELU6 conversion."""
         converter = OperatorConverter()
-        result = converter.convert("RELU6", inputs=[0], options={})
+        result = converter.convert("RELU6", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_tanh(self):
         """Test TANH conversion."""
         converter = OperatorConverter()
-        result = converter.convert("TANH", inputs=[0], options={})
+        result = converter.convert("TANH", inputs=[0], builtin_options={})
         assert callable(result)
     
     # Normalization Tests
     def test_convert_l2_normalization(self):
         """Test L2_NORMALIZATION conversion."""
         converter = OperatorConverter()
-        result = converter.convert("L2_NORMALIZATION", inputs=[0], options={})
+        result = converter.convert("L2_NORMALIZATION", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_local_response_normalization(self):
         """Test LOCAL_RESPONSE_NORMALIZATION conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOCAL_RESPONSE_NORMALIZATION", inputs=[0], options={})
+        result = converter.convert("LOCAL_RESPONSE_NORMALIZATION", inputs=[0], builtin_options={})
         assert callable(result)
     
     # Reduction Operations Tests
@@ -402,7 +402,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "REDUCE_MAX",
             inputs=[0, 1],
-            options={"keep_dims": True}
+            builtin_options={"keep_dims": True}
         )
         assert callable(result)
     
@@ -412,7 +412,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "REDUCE_MIN",
             inputs=[0, 1],
-            options={"keep_dims": False}
+            builtin_options={"keep_dims": False}
         )
         assert callable(result)
     
@@ -422,7 +422,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "REDUCE_PROD",
             inputs=[0, 1],
-            options={}
+            builtin_options={}
         )
         assert callable(result)
     
@@ -432,7 +432,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "REDUCE_ANY",
             inputs=[0, 1],
-            options={}
+            builtin_options={}
         )
         assert callable(result)
     
@@ -442,7 +442,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "SUM",
             inputs=[0, 1],
-            options={"keep_dims": True}
+            builtin_options={"keep_dims": True}
         )
         assert callable(result)
     
@@ -450,13 +450,13 @@ class TestOperatorConverter:
     def test_convert_batch_to_space_nd(self):
         """Test BATCH_TO_SPACE_ND conversion."""
         converter = OperatorConverter()
-        result = converter.convert("BATCH_TO_SPACE_ND", inputs=[0, 1], options={})
+        result = converter.convert("BATCH_TO_SPACE_ND", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_broadcast_to(self):
         """Test BROADCAST_TO conversion."""
         converter = OperatorConverter()
-        result = converter.convert("BROADCAST_TO", inputs=[0, 1], options={})
+        result = converter.convert("BROADCAST_TO", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_depth_to_space(self):
@@ -465,20 +465,20 @@ class TestOperatorConverter:
         result = converter.convert(
             "DEPTH_TO_SPACE",
             inputs=[0],
-            options={"block_size": 2}
+            builtin_options={"block_size": 2}
         )
         assert callable(result)
     
     def test_convert_expand_dims(self):
         """Test EXPAND_DIMS conversion."""
         converter = OperatorConverter()
-        result = converter.convert("EXPAND_DIMS", inputs=[0, 1], options={})
+        result = converter.convert("EXPAND_DIMS", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_fill(self):
         """Test FILL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("FILL", inputs=[0, 1], options={})
+        result = converter.convert("FILL", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_gather(self):
@@ -487,32 +487,32 @@ class TestOperatorConverter:
         result = converter.convert(
             "GATHER",
             inputs=[0, 1],
-            options={"axis": 0}
+            builtin_options={"axis": 0}
         )
         assert callable(result)
     
     def test_convert_pad(self):
         """Test PAD conversion."""
         converter = OperatorConverter()
-        result = converter.convert("PAD", inputs=[0, 1], options={})
+        result = converter.convert("PAD", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_reverse_v2(self):
         """Test REVERSE_V2 conversion."""
         converter = OperatorConverter()
-        result = converter.convert("REVERSE_V2", inputs=[0, 1], options={})
+        result = converter.convert("REVERSE_V2", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_slice(self):
         """Test SLICE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SLICE", inputs=[0, 1, 2], options={})
+        result = converter.convert("SLICE", inputs=[0, 1, 2], builtin_options={})
         assert callable(result)
     
     def test_convert_space_to_batch_nd(self):
         """Test SPACE_TO_BATCH_ND conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SPACE_TO_BATCH_ND", inputs=[0, 1, 2], options={})
+        result = converter.convert("SPACE_TO_BATCH_ND", inputs=[0, 1, 2], builtin_options={})
         assert callable(result)
     
     def test_convert_split(self):
@@ -521,26 +521,26 @@ class TestOperatorConverter:
         result = converter.convert(
             "SPLIT",
             inputs=[0, 1],
-            options={"num_splits": 2}
+            builtin_options={"num_splits": 2}
         )
         assert callable(result)
     
     def test_convert_squeeze(self):
         """Test SQUEEZE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SQUEEZE", inputs=[0], options={})
+        result = converter.convert("SQUEEZE", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_strided_slice(self):
         """Test STRIDED_SLICE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("STRIDED_SLICE", inputs=[0, 1, 2, 3], options={})
+        result = converter.convert("STRIDED_SLICE", inputs=[0, 1, 2, 3], builtin_options={})
         assert callable(result)
     
     def test_convert_tile(self):
         """Test TILE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("TILE", inputs=[0, 1], options={})
+        result = converter.convert("TILE", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_unpack(self):
@@ -549,7 +549,7 @@ class TestOperatorConverter:
         result = converter.convert(
             "UNPACK",
             inputs=[0],
-            options={"num": 3, "axis": 0}
+            builtin_options={"num": 3, "axis": 0}
         )
         assert callable(result)
     
@@ -557,148 +557,148 @@ class TestOperatorConverter:
     def test_convert_equal(self):
         """Test EQUAL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("EQUAL", inputs=[0, 1], options={})
+        result = converter.convert("EQUAL", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_greater(self):
         """Test GREATER conversion."""
         converter = OperatorConverter()
-        result = converter.convert("GREATER", inputs=[0, 1], options={})
+        result = converter.convert("GREATER", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_greater_equal(self):
         """Test GREATER_EQUAL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("GREATER_EQUAL", inputs=[0, 1], options={})
+        result = converter.convert("GREATER_EQUAL", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_less(self):
         """Test LESS conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LESS", inputs=[0, 1], options={})
+        result = converter.convert("LESS", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_less_equal(self):
         """Test LESS_EQUAL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LESS_EQUAL", inputs=[0, 1], options={})
+        result = converter.convert("LESS_EQUAL", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_not_equal(self):
         """Test NOT_EQUAL conversion."""
         converter = OperatorConverter()
-        result = converter.convert("NOT_EQUAL", inputs=[0, 1], options={})
+        result = converter.convert("NOT_EQUAL", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     # Logical Operations Tests
     def test_convert_logical_and(self):
         """Test LOGICAL_AND conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOGICAL_AND", inputs=[0, 1], options={})
+        result = converter.convert("LOGICAL_AND", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_logical_or(self):
         """Test LOGICAL_OR conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOGICAL_OR", inputs=[0, 1], options={})
+        result = converter.convert("LOGICAL_OR", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_logical_not(self):
         """Test LOGICAL_NOT conversion."""
         converter = OperatorConverter()
-        result = converter.convert("LOGICAL_NOT", inputs=[0], options={})
+        result = converter.convert("LOGICAL_NOT", inputs=[0], builtin_options={})
         assert callable(result)
     
     # Selection Operations Tests
     def test_convert_arg_max(self):
         """Test ARG_MAX conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ARG_MAX", inputs=[0, 1], options={})
+        result = converter.convert("ARG_MAX", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_arg_min(self):
         """Test ARG_MIN conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ARG_MIN", inputs=[0, 1], options={})
+        result = converter.convert("ARG_MIN", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_one_hot(self):
         """Test ONE_HOT conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ONE_HOT", inputs=[0, 1, 2, 3], options={})
+        result = converter.convert("ONE_HOT", inputs=[0, 1, 2, 3], builtin_options={})
         assert callable(result)
     
     def test_convert_select(self):
         """Test SELECT conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SELECT", inputs=[0, 1, 2], options={})
+        result = converter.convert("SELECT", inputs=[0, 1, 2], builtin_options={})
         assert callable(result)
     
     def test_convert_topk_v2(self):
         """Test TOPK_V2 conversion."""
         converter = OperatorConverter()
-        result = converter.convert("TOPK_V2", inputs=[0, 1], options={})
+        result = converter.convert("TOPK_V2", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     # Quantization Tests
     def test_convert_quantize(self):
         """Test QUANTIZE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("QUANTIZE", inputs=[0], options={})
+        result = converter.convert("QUANTIZE", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_dequantize(self):
         """Test DEQUANTIZE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("DEQUANTIZE", inputs=[0], options={})
+        result = converter.convert("DEQUANTIZE", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_fake_quant(self):
         """Test FAKE_QUANT conversion."""
         converter = OperatorConverter()
-        result = converter.convert("FAKE_QUANT", inputs=[0], options={})
+        result = converter.convert("FAKE_QUANT", inputs=[0], builtin_options={})
         assert callable(result)
     
     # Embedding & Lookup Tests
     def test_convert_embedding_lookup(self):
         """Test EMBEDDING_LOOKUP conversion."""
         converter = OperatorConverter()
-        result = converter.convert("EMBEDDING_LOOKUP", inputs=[0, 1], options={})
+        result = converter.convert("EMBEDDING_LOOKUP", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_hashtable_lookup(self):
         """Test HASHTABLE_LOOKUP conversion."""
         converter = OperatorConverter()
-        result = converter.convert("HASHTABLE_LOOKUP", inputs=[0, 1, 2], options={})
+        result = converter.convert("HASHTABLE_LOOKUP", inputs=[0, 1, 2], builtin_options={})
         assert callable(result)
     
     # Advanced Operations Tests
     def test_convert_cumsum(self):
         """Test CUMSUM conversion."""
         converter = OperatorConverter()
-        result = converter.convert("CUMSUM", inputs=[0, 1], options={})
+        result = converter.convert("CUMSUM", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_matrix_diag(self):
         """Test MATRIX_DIAG conversion."""
         converter = OperatorConverter()
-        result = converter.convert("MATRIX_DIAG", inputs=[0], options={})
+        result = converter.convert("MATRIX_DIAG", inputs=[0], builtin_options={})
         assert callable(result)
     
     def test_convert_segment_sum(self):
         """Test SEGMENT_SUM conversion."""
         converter = OperatorConverter()
-        result = converter.convert("SEGMENT_SUM", inputs=[0, 1], options={})
+        result = converter.convert("SEGMENT_SUM", inputs=[0, 1], builtin_options={})
         assert callable(result)
     
     def test_convert_where(self):
         """Test WHERE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("WHERE", inputs=[0, 1, 2], options={})
+        result = converter.convert("WHERE", inputs=[0, 1, 2], builtin_options={})
         assert callable(result)
     
     def test_convert_zeros_like(self):
         """Test ZEROS_LIKE conversion."""
         converter = OperatorConverter()
-        result = converter.convert("ZEROS_LIKE", inputs=[0], options={})
+        result = converter.convert("ZEROS_LIKE", inputs=[0], builtin_options={})
         assert callable(result)
