@@ -1143,6 +1143,10 @@ class TFLiteParser:
                 opts = schema_fb.SliceOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 
+            elif op_name == "SPACE_TO_BATCH_ND":
+                opts = schema_fb.SpaceToBatchNDOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                
             elif op_name == "SQUARE":
                 opts = schema_fb.SquareOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
@@ -1161,10 +1165,6 @@ class TFLiteParser:
                 
             elif op_name == "ZEROS_LIKE":
                 opts = schema_fb.ZerosLikeOptions()
-                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                
-            elif op_name == "SPACE_TO_BATCH_ND":
-                opts = schema_fb.SpaceToBatchNDOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
             
             # Operators without option schemas (no options defined in schema.fbs):
