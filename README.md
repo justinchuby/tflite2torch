@@ -4,12 +4,11 @@ A Python library for converting TensorFlow Lite (TFLite) models to PyTorch model
 
 ## Overview
 
-`tflite2torch` provides a complete pipeline for converting TFLite models to PyTorch through a four-stage architecture:
+`tflite2torch` provides a complete pipeline for converting TFLite models to PyTorch through a three-stage architecture:
 
 1. **TFLite Graph Parsing** - Parse TFLite model files and extract the computational graph structure
 2. **TFLite to Torch Operator Conversion** - Map TFLite operators to their PyTorch equivalents
 3. **Torch FX Graph Reconstruction** - Reconstruct the execution graph using PyTorch FX (and optionally export as `torch.export.ExportedProgram`)
-4. **Code Rendering** - Generate readable PyTorch code from the FX graph
 
 ## Installation
 
@@ -32,28 +31,23 @@ pip install -e .
 ### Basic Conversion
 
 ```python
-from tflite2torch import convert_tflite_to_torch
+import tflite2torch
 
-# Convert TFLite model to PyTorch code
-code = convert_tflite_to_torch("model.tflite", output_path="model.py")
+# Convert TFLite model to a PyTorch FX GraphModule
+graph_module = tflite2torch.convert_tflite_to_graph_module("model.tflite")
+print(graph_module.graph)
 
-# Or convert to a PyTorch FX GraphModule
-graph_module = convert_tflite_to_torch("model.tflite", generate_code=False)
+# Save the converted PyTorch model to a folder
+tflite2torch.convert_tflite_to_torch("model.tflite", "output_folder")
 ```
 
-### Using the Converter Class
+### Converting to ExportedProgram
 
 ```python
-from tflite2torch import TFLiteToTorchConverter
+import tflite2torch
 
-converter = TFLiteToTorchConverter()
-
-# Generate code
-code = converter.convert_and_save("model.tflite", "output_model.py")
-
-# Or get a GraphModule for direct execution
-graph_module = converter.convert_to_graph_module("model.tflite")
-output = graph_module(input_tensor)
+# Convert TFLite model to torch.export.ExportedProgram
+exported_program = tflite2torch.convert_tflite_to_exported_program("model.tflite")
 ```
 
 ## Architecture
@@ -63,7 +57,7 @@ output = graph_module(input_tensor)
 The `TFLiteParser` class handles parsing of TFLite FlatBuffer format:
 
 ```python
-from tflite2torch import TFLiteParser
+from tflite2torch._parser import TFLiteParser
 
 parser = TFLiteParser()
 subgraphs = parser.parse("model.tflite")
@@ -80,14 +74,11 @@ for subgraph in subgraphs:
 The `OperatorConverter` class maps TFLite operators to PyTorch:
 
 ```python
-from tflite2torch import OperatorConverter
+from tflite2torch._operator_converter import OperatorConverter
 
 converter = OperatorConverter()
-conv_info = converter.convert(
-    "CONV_2D",
-    inputs=[0, 1, 2],
-    options={"stride_h": 1, "stride_w": 1, "padding": "SAME"}
-)
+# Internal usage - typically called by FXReconstructor
+# Supports 116+ TFLite operators
 ```
 
 **Comprehensive Operator Support (116+ operators)**:
@@ -115,33 +106,31 @@ Based on the official TensorFlow Lite MLIR specification (https://www.tensorflow
 The `FXReconstructor` class rebuilds the computation graph using PyTorch FX:
 
 ```python
-from tflite2torch import FXReconstructor
+from tflite2torch._fx_reconstructor import FXReconstructor
+from tflite2torch._parser import TFLiteParser
+from tflite2torch._operator_converter import OperatorConverter
 
-reconstructor = FXReconstructor()
-graph_module = reconstructor.reconstruct(subgraph, weights)
+parser = TFLiteParser()
+subgraphs = parser.parse("model.tflite")
+weights = parser.get_weights(0)
+
+operator_converter = OperatorConverter()
+reconstructor = FXReconstructor(operator_converter)
+graph_module = reconstructor.reconstruct(subgraphs[0], weights)
 
 # Visualize the graph
 print(graph_module.graph)
-```
-
-### Stage 4: Code Rendering
-
-The `CodeRenderer` class generates readable PyTorch code:
-
-```python
-from tflite2torch import CodeRenderer
-
-renderer = CodeRenderer()
-code = renderer.render(graph_module, class_name="MyModel")
-renderer.save_to_file(code, "my_model.py")
 ```
 
 ## Examples
 
 See the `examples/` directory for complete examples:
 
+- `examples/yamnet.py` - Convert YAMNet audio classification model
+- `examples/birdnet.py` - Convert BirdNET bird sound classification model
+
 ```bash
-python examples/basic_conversion.py
+python examples/yamnet.py
 ```
 
 ## Testing
@@ -161,33 +150,87 @@ pytest tests/ --cov=tflite2torch --cov-report=html
 
 ## API Reference
 
-### Main Conversion Function
+### Main Conversion Functions
+
+#### `convert_tflite_to_torch(tflite_model_path, output_path, subgraph_index=0)`
+
+Convert a TFLite model to PyTorch and save to a folder.
 
 ```python
 convert_tflite_to_torch(
     tflite_model_path: str,
-    output_path: Optional[str] = None,
-    generate_code: bool = True,
+    output_path: str,
     subgraph_index: int = 0
-) -> Union[GraphModule, str]
+) -> None
 ```
 
 **Parameters:**
 - `tflite_model_path`: Path to the TFLite model file (.tflite)
-- `output_path`: Optional path to save generated PyTorch code
-- `generate_code`: Whether to generate Python code (default: True)
+- `output_path`: Path to folder where the PyTorch model will be saved
 - `subgraph_index`: Index of the subgraph to convert (default: 0)
 
-**Returns:**
-- If `generate_code=True`: Generated PyTorch code as string
-- If `generate_code=False`: PyTorch FX GraphModule
+**Returns:** None (saves model to the specified folder)
 
-### Classes
+**Example:**
+```python
+import tflite2torch
+tflite2torch.convert_tflite_to_torch("model.tflite", "output_folder")
+```
+
+#### `convert_tflite_to_graph_module(tflite_model_path, subgraph_index=0)`
+
+Convert a TFLite model to a PyTorch FX GraphModule.
+
+```python
+convert_tflite_to_graph_module(
+    tflite_model_path: str,
+    subgraph_index: int = 0
+) -> GraphModule
+```
+
+**Parameters:**
+- `tflite_model_path`: Path to the TFLite model file (.tflite)
+- `subgraph_index`: Index of the subgraph to convert (default: 0)
+
+**Returns:** PyTorch FX GraphModule that can be executed directly
+
+**Example:**
+```python
+import tflite2torch
+graph_module = tflite2torch.convert_tflite_to_graph_module("model.tflite")
+output = graph_module(input_tensor)
+```
+
+#### `convert_tflite_to_exported_program(tflite_model_path, subgraph_index=0)`
+
+Convert a TFLite model to torch.export.ExportedProgram.
+
+```python
+convert_tflite_to_exported_program(
+    tflite_model_path: str,
+    subgraph_index: int = 0
+) -> ExportedProgram
+```
+
+**Parameters:**
+- `tflite_model_path`: Path to the TFLite model file (.tflite)
+- `subgraph_index`: Index of the subgraph to convert (default: 0)
+
+**Returns:** torch.export.ExportedProgram (requires PyTorch 2.7+)
+
+**Example:**
+```python
+import tflite2torch
+exported_program = tflite2torch.convert_tflite_to_exported_program("model.tflite")
+```
+
+### Internal Classes
+
+These classes are used internally by the conversion pipeline:
 
 - `TFLiteParser`: Parse TFLite model files
 - `OperatorConverter`: Convert TFLite operators to PyTorch
 - `FXReconstructor`: Reconstruct computation graph in PyTorch FX
-- `CodeRenderer`: Generate PyTorch code from FX graph
 - `TFLiteToTorchConverter`: Main converter orchestrating all stages
 
 ## Limitations
