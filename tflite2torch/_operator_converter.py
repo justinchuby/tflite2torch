@@ -8,8 +8,12 @@ to their corresponding PyTorch custom operator implementations in tflite2torch.o
 from __future__ import annotations
 
 import inspect
+import logging
 import re
 import torch
+
+
+logger = logging.getLogger(__name__)
 
 
 # Compile regex pattern once for performance
@@ -258,13 +262,15 @@ class OperatorConverter:
         
         return transformed
     
-    def _filter_kwargs_for_function(self, func, kwargs: dict) -> dict:
+    def _filter_kwargs_for_function(self, func, kwargs: dict, op_type: str = "") -> dict:
         """
         Filter kwargs to only include parameters that the function accepts.
+        Warns when arguments are filtered out.
         
         Args:
             func: The function/op to inspect
             kwargs: Dictionary of keyword arguments to filter
+            op_type: Operator type name for logging purposes
             
         Returns:
             Filtered kwargs dict with only accepted parameters
@@ -301,6 +307,17 @@ class OperatorConverter:
                     
                     # Filter kwargs to only include accepted parameters
                     filtered = {k: v for k, v in kwargs.items() if k in param_names}
+                    
+                    # Warn about filtered out arguments
+                    filtered_out = set(kwargs.keys()) - set(filtered.keys())
+                    if filtered_out:
+                        op_name = op_type if op_type else "operator"
+                        logger.warning(
+                            f"{op_name}: The following arguments from TFLite schema are not supported "
+                            f"by the custom op implementation and will be ignored: {sorted(filtered_out)}. "
+                            f"Consider updating the custom op to support these arguments."
+                        )
+                    
                     return filtered
             
             # Fallback: try to inspect as a regular Python function
@@ -326,6 +343,17 @@ class OperatorConverter:
                 return kwargs.copy()
             
             filtered = {k: v for k, v in kwargs.items() if k in param_names}
+            
+            # Warn about filtered out arguments
+            filtered_out = set(kwargs.keys()) - set(filtered.keys())
+            if filtered_out:
+                op_name = op_type if op_type else "operator"
+                logger.warning(
+                    f"{op_name}: The following arguments from TFLite schema are not supported "
+                    f"by the custom op implementation and will be ignored: {sorted(filtered_out)}. "
+                    f"Consider updating the custom op to support these arguments."
+                )
+            
             return filtered
             
         except Exception:
@@ -387,7 +415,7 @@ class OperatorConverter:
                 # Transform options to match custom op parameter names
                 transformed_options = self._transform_options_for_op(op_type, builtin_options)
                 # Filter kwargs to only pass parameters that the custom op accepts
-                kwargs = self._filter_kwargs_for_function(op_func, transformed_options)
+                kwargs = self._filter_kwargs_for_function(op_func, transformed_options, op_type)
 
             # For operators that expect list[torch.Tensor] as first argument,
             # wrap all input nodes in a list
