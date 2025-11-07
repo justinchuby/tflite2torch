@@ -16,9 +16,11 @@ from ._converter import (
     convert_tflite_to_graph_module,
     convert_tflite_to_exported_program,
 )
+from . import ops
 
 __all__ = [
     "convert_tflite_to_torch",
     "convert_tflite_to_graph_module",
     "convert_tflite_to_exported_program",
+    "ops",
 ]
