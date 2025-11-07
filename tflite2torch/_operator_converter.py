@@ -7,7 +7,6 @@ to their corresponding PyTorch custom operator implementations in tflite2torch.o
 
 from __future__ import annotations
 
-import inspect
 import torch
 
 
@@ -259,12 +258,19 @@ class OperatorConverter:
                 # The custom op implementations will handle which ones they need
                 kwargs = builtin_options.copy()
 
+            # For operators that expect list[torch.Tensor] as first argument,
+            # wrap all input nodes in a list
+            if op_type in self.LIST_INPUT_OPS:
+                args = (list(input_nodes),)
+            else:
+                args = tuple(input_nodes)
+
             # Call the custom op with input nodes and options
             # The custom ops are already registered with torch.library.custom_op
             # so we can call them directly through torch.ops.tfl
             output_node = graph.call_function(
                 op_func,
-                args=tuple(input_nodes),
+                args=args,
                 kwargs=kwargs,
             )
             output_node.name = node_name
