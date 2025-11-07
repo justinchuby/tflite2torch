@@ -456,9 +456,10 @@ def _(params, indices, axis):
 
 # 37: BATCH_TO_SPACE_ND
 @torch.library.custom_op("tfl::batch_to_space_nd", mutates_args=())
-def tfl_batch_to_space_nd(x: torch.Tensor, block_shape: list[int], crops: list[list[int]]) -> torch.Tensor:
+def tfl_batch_to_space_nd(x: torch.Tensor, block_shape: list[int], crops: list[int]) -> torch.Tensor:
     # Rearranges data from batch into blocks of spatial data
     # This is the inverse of SPACE_TO_BATCH_ND
+    # crops is a flattened list: [crop_top, crop_bottom, crop_left, crop_right]
     batch, height, width, channels = x.shape
     block_height, block_width = block_shape
 
@@ -467,10 +468,9 @@ def tfl_batch_to_space_nd(x: torch.Tensor, block_shape: list[int], crops: list[l
     x = x.permute(0, 3, 1, 4, 2, 5)
     x = x.reshape(batch // (block_height * block_width), height * block_height, width * block_width, channels)
 
-    # Apply crops
-    if crops and any(c != [0, 0] for c in crops):
-        crop_top, crop_bottom = crops[0]
-        crop_left, crop_right = crops[1]
+    # Apply crops - crops format: [crop_top, crop_bottom, crop_left, crop_right]
+    if crops and any(c != 0 for c in crops):
+        crop_top, crop_bottom, crop_left, crop_right = crops[0], crops[1], crops[2], crops[3]
         x = x[:, crop_top:height * block_height - crop_bottom, crop_left:width * block_width - crop_right, :]
 
     return x
@@ -492,15 +492,15 @@ def _(x, block_shape, crops):
 
 # 38: SPACE_TO_BATCH_ND
 @torch.library.custom_op("tfl::space_to_batch_nd", mutates_args=())
-def tfl_space_to_batch_nd(x: torch.Tensor, block_shape: list[int], paddings: list[list[int]]) -> torch.Tensor:
+def tfl_space_to_batch_nd(x: torch.Tensor, block_shape: list[int], paddings: list[int]) -> torch.Tensor:
     # Rearranges blocks of spatial data into batch
+    # paddings is a flattened list: [pad_top, pad_bottom, pad_left, pad_right]
     batch, height, width, channels = x.shape
     block_height, block_width = block_shape
 
-    # Apply padding
-    if paddings and any(p != [0, 0] for p in paddings):
-        pad_top, pad_bottom = paddings[0]
-        pad_left, pad_right = paddings[1]
+    # Apply padding - paddings format: [pad_top, pad_bottom, pad_left, pad_right]
+    if paddings and any(p != 0 for p in paddings):
+        pad_top, pad_bottom, pad_left, pad_right = paddings[0], paddings[1], paddings[2], paddings[3]
         x = torch.nn.functional.pad(x.permute(0, 3, 1, 2), (pad_left, pad_right, pad_top, pad_bottom)).permute(0, 2, 3, 1)
         height = height + pad_top + pad_bottom
         width = width + pad_left + pad_right
@@ -1476,22 +1476,26 @@ def tfl_reverse_sequence(x: torch.Tensor, seq_lengths: torch.Tensor, seq_dim: in
     for i in range(x.shape[batch_dim]):
         seq_len = int(seq_lengths[i])
 
-        # Build indexing tuple
+        # Handle common case first
         if batch_dim == 0 and seq_dim == 1:
             output[i, :seq_len] = torch.flip(x[i, :seq_len], dims=[0])
-        elif batch_dim == 0:
-            # Generic indexing for other seq_dim values
-            idx = [slice(None)] * x.ndim
-            idx[batch_dim] = i
-            idx[seq_dim] = slice(0, seq_len)
-            output[tuple(idx)] = torch.flip(x[tuple(idx)], dims=[seq_dim - 1 if seq_dim > batch_dim else seq_dim])
+        elif batch_dim == 0 and seq_dim == 0:
+            # Can't reverse batch dimension itself
+            continue
         else:
-            # Generic handling for other batch_dim cases
-            idx = [slice(None)] * x.ndim
-            idx[batch_dim] = slice(i, i + 1)
-            idx[seq_dim] = slice(0, seq_len)
-            sliced = x[tuple(idx)]
-            output[tuple(idx)] = torch.flip(sliced, dims=[seq_dim])
+            # For other cases, use movedim to bring batch_dim to front
+            x_moved = x.movedim(batch_dim, 0)
+            out_moved = output.movedim(batch_dim, 0)
+
+            # Get the sequence for this batch element
+            seq = x_moved[i]
+            # Adjust seq_dim for moved tensor
+            adj_seq_dim = seq_dim if seq_dim < batch_dim else seq_dim - 1
+
+            # Create slice for reversing
+            slices = [slice(None)] * seq.ndim
+            slices[adj_seq_dim] = slice(0, seq_len)
+            out_moved[i][tuple(slices)] = torch.flip(seq[tuple(slices)], dims=[adj_seq_dim])
 
     return output
 

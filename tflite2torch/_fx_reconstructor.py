@@ -176,6 +176,7 @@ class FXReconstructor:
         name = name.replace(":", "_")
         name = name.replace("-", "_")
         name = name.replace(".", "_")
+        name = name.replace(";", "_")
 
         # Ensure it starts with a letter or underscore
         if name and not (name[0].isalpha() or name[0] == "_"):
