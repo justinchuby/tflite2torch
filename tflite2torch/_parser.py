@@ -575,6 +575,29 @@ class TFLiteParser:
                 options["fused_activation_function"] = self._get_activation_name(
                     opts.FusedActivationFunction()
                 )
+            elif builtin_code == TFLiteParser.OPCODE_MAP.get("PACK"):
+                opts = schema_fb.PackOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["dim"] = opts.Axis()
+            elif builtin_code == TFLiteParser.OPCODE_MAP.get("CONCATENATION"):
+                opts = schema_fb.ConcatenationOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["dim"] = opts.Axis()
+                # Note: fused_activation_function is available but not used
+                # options["fused_activation_function"] = self._get_activation_name(
+                #     opts.FusedActivationFunction()
+                # )
+            elif builtin_code == TFLiteParser.OPCODE_MAP.get("GATHER"):
+                opts = schema_fb.GatherOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["axis"] = opts.Axis()
+                options["batch_dims"] = opts.BatchDims()
+            elif builtin_code == TFLiteParser.OPCODE_MAP.get("SQUEEZE"):
+                opts = schema_fb.SqueezeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                if not opts.SqueezeDimsIsNone():
+                    squeeze_dims = [opts.SqueezeDims(i) for i in range(opts.SqueezeDimsLength())]
+                    options["dims"] = squeeze_dims
             # Add more operator-specific option parsing as needed
         except Exception:
             # If parsing fails, return empty options

@@ -145,8 +145,21 @@ class FXReconstructor:
         self.node_counter = node_counter_dict["count"]
 
         # Map output tensor indices to the output node
-        for output_idx in operator.outputs:
-            self.tensor_map[output_idx] = output_node
+        # If operator has multiple outputs, create getitem nodes to unpack
+        if len(operator.outputs) > 1:
+            # Multi-output operator - create getitem nodes for each output
+            import operator as op_module
+            for idx, output_idx in enumerate(operator.outputs):
+                getitem_node = self.graph.call_function(
+                    op_module.getitem,
+                    args=(output_node, idx),
+                )
+                getitem_node.name = f"{node_name}_{idx}"
+                self.tensor_map[output_idx] = getitem_node
+        else:
+            # Single output - map directly
+            for output_idx in operator.outputs:
+                self.tensor_map[output_idx] = output_node
 
     def _create_root_module(self) -> nn.Module:
         """Create a module containing all parameters and sub-modules."""
@@ -176,6 +189,7 @@ class FXReconstructor:
         name = name.replace(":", "_")
         name = name.replace("-", "_")
         name = name.replace(".", "_")
+        name = name.replace(";", "_")
 
         # Ensure it starts with a letter or underscore
         if name and not (name[0].isalpha() or name[0] == "_"):
