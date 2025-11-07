@@ -544,11 +544,12 @@ class TFLiteParser:
         if not builtin_opts:
             return options
 
-        # Parse common options based on operator type
-        # This is a simplified version - full implementation would handle all operator types
+        # Map operator code to option parser
+        op_name = TFLiteParser.OPERATOR_CODES.get(builtin_code, "")
+        
         try:
-            # Try to parse as Conv2DOptions (most common)
-            if builtin_code == TFLiteParser.OPCODE_MAP.get("CONV_2D"):
+            # Convolution and pooling operators
+            if op_name == "CONV_2D":
                 opts = schema_fb.Conv2DOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 options["padding"] = self._get_padding_name(opts.Padding())
@@ -557,50 +558,468 @@ class TFLiteParser:
                 options["fused_activation_function"] = self._get_activation_name(
                     opts.FusedActivationFunction()
                 )
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("FULLY_CONNECTED"):
+                options["dilation_w_factor"] = opts.DilationWFactor()
+                options["dilation_h_factor"] = opts.DilationHFactor()
+                
+            elif op_name == "DEPTHWISE_CONV_2D":
+                opts = schema_fb.DepthwiseConv2DOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["padding"] = self._get_padding_name(opts.Padding())
+                options["stride_w"] = opts.StrideW()
+                options["stride_h"] = opts.StrideH()
+                options["depth_multiplier"] = opts.DepthMultiplier()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["dilation_w_factor"] = opts.DilationWFactor()
+                options["dilation_h_factor"] = opts.DilationHFactor()
+                
+            elif op_name == "CONV_3D":
+                opts = schema_fb.Conv3DOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["padding"] = self._get_padding_name(opts.Padding())
+                options["stride_d"] = opts.StrideD()
+                options["stride_h"] = opts.StrideH()
+                options["stride_w"] = opts.StrideW()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["dilation_d_factor"] = opts.DilationDFactor()
+                options["dilation_w_factor"] = opts.DilationWFactor()
+                options["dilation_h_factor"] = opts.DilationHFactor()
+                
+            elif op_name == "TRANSPOSE_CONV":
+                opts = schema_fb.TransposeConvOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["padding"] = self._get_padding_name(opts.Padding())
+                options["stride_w"] = opts.StrideW()
+                options["stride_h"] = opts.StrideH()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                
+            elif op_name in ["AVERAGE_POOL_2D", "MAX_POOL_2D", "L2_POOL_2D"]:
+                opts = schema_fb.Pool2DOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["padding"] = self._get_padding_name(opts.Padding())
+                options["stride_w"] = opts.StrideW()
+                options["stride_h"] = opts.StrideH()
+                options["filter_width"] = opts.FilterWidth()
+                options["filter_height"] = opts.FilterHeight()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                
+            # Fully connected and matrix operations
+            elif op_name == "FULLY_CONNECTED":
                 opts = schema_fb.FullyConnectedOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 options["fused_activation_function"] = self._get_activation_name(
                     opts.FusedActivationFunction()
                 )
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("LEAKY_RELU"):
+                options["weights_format"] = opts.WeightsFormat()
+                options["keep_num_dims"] = opts.KeepNumDims()
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "BATCH_MATMUL":
+                opts = schema_fb.BatchMatMulOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["adj_x"] = opts.AdjX()
+                options["adj_y"] = opts.AdjY()
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            # Activation functions
+            elif op_name == "LEAKY_RELU":
                 opts = schema_fb.LeakyReluOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 options["alpha"] = opts.Alpha()
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("CONV_3D"):
-                opts = schema_fb.Conv3DOptions()
+                
+            elif op_name == "SOFTMAX":
+                opts = schema_fb.SoftmaxOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options["padding"] = self._get_padding_name(opts.Padding())
-                options["stride"] = [opts.StrideD(), opts.StrideH(), opts.StrideW()]
+                options["beta"] = opts.Beta()
+                
+            elif op_name == "GELU":
+                opts = schema_fb.GeluOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["approximate"] = opts.Approximate()
+                
+            # Shape and tensor manipulation
+            elif op_name == "RESHAPE":
+                opts = schema_fb.ReshapeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                if not opts.NewShapeIsNone():
+                    options["new_shape"] = [opts.NewShape(i) for i in range(opts.NewShapeLength())]
+                    
+            elif op_name == "CONCATENATION":
+                opts = schema_fb.ConcatenationOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["axis"] = opts.Axis()
                 options["fused_activation_function"] = self._get_activation_name(
                     opts.FusedActivationFunction()
                 )
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("PACK"):
+                
+            elif op_name == "PACK":
                 opts = schema_fb.PackOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options["dim"] = opts.Axis()
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("CONCATENATION"):
-                opts = schema_fb.ConcatenationOptions()
+                options["values_count"] = opts.ValuesCount()
+                options["axis"] = opts.Axis()
+                
+            elif op_name == "UNPACK":
+                opts = schema_fb.UnpackOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                options["dim"] = opts.Axis()
-                # Note: fused_activation_function is available but not used
-                # options["fused_activation_function"] = self._get_activation_name(
-                #     opts.FusedActivationFunction()
-                # )
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("GATHER"):
+                options["num"] = opts.Num()
+                options["axis"] = opts.Axis()
+                
+            elif op_name == "SQUEEZE":
+                opts = schema_fb.SqueezeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                if not opts.SqueezeDimsIsNone():
+                    options["squeeze_dims"] = [opts.SqueezeDims(i) for i in range(opts.SqueezeDimsLength())]
+                    
+            elif op_name == "SPLIT":
+                opts = schema_fb.SplitOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["num_splits"] = opts.NumSplits()
+                
+            elif op_name == "SPLIT_V":
+                opts = schema_fb.SplitVOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["num_splits"] = opts.NumSplits()
+                
+            elif op_name == "GATHER":
                 opts = schema_fb.GatherOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 options["axis"] = opts.Axis()
                 options["batch_dims"] = opts.BatchDims()
-            elif builtin_code == TFLiteParser.OPCODE_MAP.get("SQUEEZE"):
-                opts = schema_fb.SqueezeOptions()
+                
+            elif op_name == "STRIDED_SLICE":
+                opts = schema_fb.StridedSliceOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
-                if not opts.SqueezeDimsIsNone():
-                    squeeze_dims = [opts.SqueezeDims(i) for i in range(opts.SqueezeDimsLength())]
-                    options["dims"] = squeeze_dims
-            # Add more operator-specific option parsing as needed
+                options["begin_mask"] = opts.BeginMask()
+                options["end_mask"] = opts.EndMask()
+                options["ellipsis_mask"] = opts.EllipsisMask()
+                options["new_axis_mask"] = opts.NewAxisMask()
+                options["shrink_axis_mask"] = opts.ShrinkAxisMask()
+                options["offset"] = opts.Offset()
+                
+            elif op_name == "SPACE_TO_DEPTH":
+                opts = schema_fb.SpaceToDepthOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["block_size"] = opts.BlockSize()
+                
+            elif op_name == "DEPTH_TO_SPACE":
+                opts = schema_fb.DepthToSpaceOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["block_size"] = opts.BlockSize()
+                
+            elif op_name == "TRANSPOSE":
+                opts = schema_fb.TransposeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                # TransposeOptions is empty, perm comes from input tensor
+                
+            # Reduction operations
+            elif op_name in ["MEAN", "SUM", "REDUCE_MAX", "REDUCE_MIN", "REDUCE_PROD", "REDUCE_ANY", "REDUCE_ALL"]:
+                opts = schema_fb.ReducerOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["keep_dims"] = opts.KeepDims()
+                
+            # Resize operations
+            elif op_name == "RESIZE_BILINEAR":
+                opts = schema_fb.ResizeBilinearOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["align_corners"] = opts.AlignCorners()
+                options["half_pixel_centers"] = opts.HalfPixelCenters()
+                
+            elif op_name == "RESIZE_NEAREST_NEIGHBOR":
+                opts = schema_fb.ResizeNearestNeighborOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["align_corners"] = opts.AlignCorners()
+                options["half_pixel_centers"] = opts.HalfPixelCenters()
+                
+            # Element-wise operations with activation
+            elif op_name == "ADD":
+                opts = schema_fb.AddOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["pot_scale_int16"] = opts.PotScaleInt16()
+                
+            elif op_name == "SUB":
+                opts = schema_fb.SubOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["pot_scale_int16"] = opts.PotScaleInt16()
+                
+            elif op_name == "MUL":
+                opts = schema_fb.MulOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                
+            elif op_name == "DIV":
+                opts = schema_fb.DivOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                
+            # Comparison and logical operations
+            elif op_name == "ARG_MAX":
+                opts = schema_fb.ArgMaxOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["output_type"] = opts.OutputType()
+                
+            elif op_name == "ARG_MIN":
+                opts = schema_fb.ArgMinOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["output_type"] = opts.OutputType()
+                
+            elif op_name == "ONE_HOT":
+                opts = schema_fb.OneHotOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["axis"] = opts.Axis()
+                
+            # Type conversion
+            elif op_name == "CAST":
+                opts = schema_fb.CastOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["in_data_type"] = opts.InDataType()
+                options["out_data_type"] = opts.OutDataType()
+                
+            # Quantization
+            elif op_name == "FAKE_QUANT":
+                opts = schema_fb.FakeQuantOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["min"] = opts.Min()
+                options["max"] = opts.Max()
+                options["num_bits"] = opts.NumBits()
+                options["narrow_range"] = opts.NarrowRange()
+                
+            # Advanced operations
+            elif op_name == "REVERSE_SEQUENCE":
+                opts = schema_fb.ReverseSequenceOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["seq_dim"] = opts.SeqDim()
+                options["batch_dim"] = opts.BatchDim()
+                
+            elif op_name == "MIRROR_PAD":
+                opts = schema_fb.MirrorPadOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["mode"] = opts.Mode()
+                
+            elif op_name == "UNIQUE":
+                opts = schema_fb.UniqueOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["idx_out_type"] = opts.IdxOutType()
+                
+            elif op_name == "CUMSUM":
+                opts = schema_fb.CumsumOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["exclusive"] = opts.Exclusive()
+                options["reverse"] = opts.Reverse()
+                
+            elif op_name == "SHAPE":
+                opts = schema_fb.ShapeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["out_type"] = opts.OutType()
+                
+            elif op_name == "SPARSE_TO_DENSE":
+                opts = schema_fb.SparseToDenseOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["validate_indices"] = opts.ValidateIndices()
+                
+            elif op_name == "TOPK_V2":
+                opts = schema_fb.TopKV2Options()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                # TopKV2Options is empty
+                
+            elif op_name == "LOG_SOFTMAX":
+                opts = schema_fb.LogSoftmaxOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                # LogSoftmaxOptions is empty
+                
+            elif op_name == "L2_NORMALIZATION":
+                opts = schema_fb.L2NormOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                
+            elif op_name == "LOCAL_RESPONSE_NORMALIZATION":
+                opts = schema_fb.LocalResponseNormalizationOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["radius"] = opts.Radius()
+                options["bias"] = opts.Bias()
+                options["alpha"] = opts.Alpha()
+                options["beta"] = opts.Beta()
+                
+            # RNN and LSTM operations
+            elif op_name == "LSTM":
+                opts = schema_fb.LSTMOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["cell_clip"] = opts.CellClip()
+                options["proj_clip"] = opts.ProjClip()
+                options["kernel_type"] = opts.KernelType()
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "UNIDIRECTIONAL_SEQUENCE_LSTM":
+                opts = schema_fb.UnidirectionalSequenceLSTMOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["cell_clip"] = opts.CellClip()
+                options["proj_clip"] = opts.ProjClip()
+                options["time_major"] = opts.TimeMajor()
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "BIDIRECTIONAL_SEQUENCE_LSTM":
+                opts = schema_fb.BidirectionalSequenceLSTMOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["cell_clip"] = opts.CellClip()
+                options["proj_clip"] = opts.ProjClip()
+                options["merge_outputs"] = opts.MergeOutputs()
+                options["time_major"] = opts.TimeMajor()
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "RNN":
+                opts = schema_fb.RNNOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "UNIDIRECTIONAL_SEQUENCE_RNN":
+                opts = schema_fb.SequenceRNNOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["time_major"] = opts.TimeMajor()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "BIDIRECTIONAL_SEQUENCE_RNN":
+                opts = schema_fb.BidirectionalSequenceRNNOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["time_major"] = opts.TimeMajor()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["merge_outputs"] = opts.MergeOutputs()
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            elif op_name == "SVDF":
+                opts = schema_fb.SVDFOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["rank"] = opts.Rank()
+                options["fused_activation_function"] = self._get_activation_name(
+                    opts.FusedActivationFunction()
+                )
+                options["asymmetric_quantize_inputs"] = opts.AsymmetricQuantizeInputs()
+                
+            # Control flow
+            elif op_name == "IF":
+                opts = schema_fb.IfOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["then_subgraph_index"] = opts.ThenSubgraphIndex()
+                options["else_subgraph_index"] = opts.ElseSubgraphIndex()
+                
+            elif op_name == "WHILE":
+                opts = schema_fb.WhileOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["cond_subgraph_index"] = opts.CondSubgraphIndex()
+                options["body_subgraph_index"] = opts.BodySubgraphIndex()
+                
+            elif op_name == "CALL_ONCE":
+                opts = schema_fb.CallOnceOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["init_subgraph_index"] = opts.InitSubgraphIndex()
+                
+            # Embedding and lookup operations
+            elif op_name == "EMBEDDING_LOOKUP_SPARSE":
+                opts = schema_fb.EmbeddingLookupSparseOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["combiner"] = opts.Combiner()
+                
+            elif op_name == "LSH_PROJECTION":
+                opts = schema_fb.LSHProjectionOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["type"] = opts.Type()
+                
+            elif op_name == "SKIP_GRAM":
+                opts = schema_fb.SkipGramOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["ngram_size"] = opts.NgramSize()
+                options["max_skip_size"] = opts.MaxSkipSize()
+                options["include_all_ngrams"] = opts.IncludeAllNgrams()
+                
+            elif op_name == "CONCAT_EMBEDDINGS":
+                opts = schema_fb.ConcatEmbeddingsOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["num_channels"] = opts.NumChannels()
+                if not opts.NumColumnsPerChannelIsNone():
+                    options["num_columns_per_channel"] = [
+                        opts.NumColumnsPerChannel(i) for i in range(opts.NumColumnsPerChannelLength())
+                    ]
+                if not opts.EmbeddingDimPerChannelIsNone():
+                    options["embedding_dim_per_channel"] = [
+                        opts.EmbeddingDimPerChannel(i) for i in range(opts.EmbeddingDimPerChannelLength())
+                    ]
+                    
+            # Hashtable operations
+            elif op_name == "HASHTABLE":
+                opts = schema_fb.HashtableOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["table_id"] = opts.TableId()
+                options["key_dtype"] = opts.KeyDtype()
+                options["value_dtype"] = opts.ValueDtype()
+                
+            elif op_name == "VAR_HANDLE":
+                opts = schema_fb.VarHandleOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                container = opts.Container()
+                shared_name = opts.SharedName()
+                options["container"] = container.decode("utf-8") if container else ""
+                options["shared_name"] = shared_name.decode("utf-8") if shared_name else ""
+                
+            elif op_name in ["RANDOM_UNIFORM", "RANDOM_STANDARD_NORMAL", "MULTINOMIAL"]:
+                opts = schema_fb.RandomOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                options["seed"] = opts.Seed()
+                options["seed2"] = opts.Seed2()
+                
+            elif op_name == "BUCKETIZE":
+                opts = schema_fb.BucketizeOptions()
+                opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
+                if not opts.BoundariesIsNone():
+                    options["boundaries"] = [opts.Boundaries(i) for i in range(opts.BoundariesLength())]
+                    
+            # Operators with schemas that are not yet implemented:
+            # ABS, ADD_N, BATCH_TO_SPACE_ND, BROADCAST_TO, COS, DEQUANTIZE, EQUAL, EXP,
+            # EXPAND_DIMS, FILL, FLOOR_DIV, FLOOR_MOD, GATHER_ND, GREATER, GREATER_EQUAL,
+            # HARD_SWISH, LESS, LESS_EQUAL, MATRIX_DIAG, MATRIX_SET_DIAG, NEG, NOT_EQUAL,
+            # PAD, PADV2, QUANTIZE, RANGE, RANK, REVERSE_V2, RFFT2D, SCATTER_ND, SEGMENT_SUM,
+            # SELECT, SELECT_V2, SLICE, SPACE_TO_BATCH_ND, SQUARE, SQUARED_DIFFERENCE, TILE,
+            # WHERE, ZEROS_LIKE
+            
+            # Operators without option schemas (no options defined in schema.fbs):
+            # ELU, FLOOR, LOG, LOGISTIC, PRELU, RELU, RELU6, ROUND, RSQRT, SIN, SQRT, TANH
+                
         except Exception:
             # If parsing fails, return empty options
+            # This is intentionally lenient to handle schema evolution
             pass
 
         return options
