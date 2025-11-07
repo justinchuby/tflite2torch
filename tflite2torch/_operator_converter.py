@@ -8,7 +8,12 @@ to their corresponding PyTorch custom operator implementations in tflite2torch.o
 from __future__ import annotations
 
 import inspect
+import re
 import torch
+
+
+# Compile regex pattern once for performance
+_SCHEMA_PARAM_PATTERN = re.compile(r'\((.*?)\)')
 
 
 def _get_tfl_ops():
@@ -276,8 +281,7 @@ class OperatorConverter:
                 
                 # Parse schema to extract parameter names
                 # Format: "namespace::op_name(Type param1, Type param2, ...) -> ReturnType"
-                import re
-                match = re.search(r'\((.*?)\)', schema_str)
+                match = _SCHEMA_PARAM_PATTERN.search(schema_str)
                 if match:
                     params_str = match.group(1)
                     param_names = []

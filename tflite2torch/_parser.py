@@ -994,7 +994,7 @@ class TFLiteParser:
                 options["container"] = container.decode("utf-8") if container else ""
                 options["shared_name"] = shared_name.decode("utf-8") if shared_name else ""
                 
-            elif op_name == "RANDOM_UNIFORM" or op_name == "RANDOM_STANDARD_NORMAL" or op_name == "MULTINOMIAL":
+            elif op_name in ["RANDOM_UNIFORM", "RANDOM_STANDARD_NORMAL", "MULTINOMIAL"]:
                 opts = schema_fb.RandomOptions()
                 opts.Init(builtin_opts.Bytes, builtin_opts.Pos)
                 options["seed"] = opts.Seed()
