@@ -26,6 +26,13 @@ class OperatorConverter:
     registered in the tfl namespace (torch.ops.tfl).
     """
 
+    # Operators that expect list[torch.Tensor] as first argument
+    # For these, we wrap all input tensors in a list
+    LIST_INPUT_OPS = {
+        "CONCATENATION",
+        "PACK",
+    }
+
     # Mapping from TFLite operator names to custom op function names
     OP_MAP = {
         "ADD": "add",

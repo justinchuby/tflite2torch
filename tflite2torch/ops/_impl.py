@@ -1235,34 +1235,65 @@ def _(x, min_val, max_val, num_bits):
 
 # 81: REDUCE_PROD
 @torch.library.custom_op("tfl::reduce_prod", mutates_args=())
-def tfl_reduce_prod(x: torch.Tensor, dim: list[int], keepdim: bool) -> torch.Tensor:
+def tfl_reduce_prod(x: torch.Tensor, dim: torch.Tensor, keepdim: bool = False) -> torch.Tensor:
+    # Convert dim tensor to list of ints
+    if dim.numel() == 0:
+        # Scalar tensor - single dimension
+        return torch.prod(x)
+    elif dim.dim() == 0:
+        # 0-dimensional tensor (scalar)
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
     result = x
-    for d in sorted(dim, reverse=True):
+    for d in sorted(dim_list, reverse=True):
         result = torch.prod(result, dim=d, keepdim=keepdim)
     return result
 
 
 @tfl_reduce_prod.register_fake
-def _(x, dim, keepdim):
+def _(x, dim, keepdim=False):
+    if dim.numel() == 0:
+        return torch.prod(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
     result = x
-    for d in sorted(dim, reverse=True):
+    for d in sorted(dim_list, reverse=True):
         result = torch.prod(result, dim=d, keepdim=keepdim)
     return result
 
 
 # 82: REDUCE_MAX
 @torch.library.custom_op("tfl::reduce_max", mutates_args=())
-def tfl_reduce_max(x: torch.Tensor, dim: list[int], keepdim: bool) -> torch.Tensor:
+def tfl_reduce_max(x: torch.Tensor, dim: torch.Tensor, keepdim: bool = False) -> torch.Tensor:
+    if dim.numel() == 0:
+        return torch.amax(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
     result = x
-    for d in sorted(dim, reverse=True):
+    for d in sorted(dim_list, reverse=True):
         result = torch.amax(result, dim=d, keepdim=keepdim)
     return result
 
 
 @tfl_reduce_max.register_fake
-def _(x, dim, keepdim):
+def _(x, dim, keepdim=False):
+    if dim.numel() == 0:
+        return torch.amax(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
     result = x
-    for d in sorted(dim, reverse=True):
+    for d in sorted(dim_list, reverse=True):
         result = torch.amax(result, dim=d, keepdim=keepdim)
     return result
 
@@ -1337,17 +1368,31 @@ def _(x, num, axis):
 
 # 89: REDUCE_MIN
 @torch.library.custom_op("tfl::reduce_min", mutates_args=())
-def tfl_reduce_min(x: torch.Tensor, dim: list[int], keepdim: bool) -> torch.Tensor:
+def tfl_reduce_min(x: torch.Tensor, dim: torch.Tensor, keepdim: bool = False) -> torch.Tensor:
+    if dim.numel() == 0:
+        return torch.amin(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
     result = x
-    for d in sorted(dim, reverse=True):
+    for d in sorted(dim_list, reverse=True):
         result = torch.amin(result, dim=d, keepdim=keepdim)
     return result
 
 
 @tfl_reduce_min.register_fake
-def _(x, dim, keepdim):
+def _(x, dim, keepdim=False):
+    if dim.numel() == 0:
+        return torch.amin(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
     result = x
-    for d in sorted(dim, reverse=True):
+    for d in sorted(dim_list, reverse=True):
         result = torch.amin(result, dim=d, keepdim=keepdim)
     return result
 
@@ -1365,13 +1410,33 @@ def _(x, y):
 
 # 91: REDUCE_ANY
 @torch.library.custom_op("tfl::reduce_any", mutates_args=())
-def tfl_reduce_any(x: torch.Tensor, dim: list[int], keepdim: bool) -> torch.Tensor:
-    return torch.any(x, dim=dim[0] if len(dim) == 1 else None, keepdim=keepdim)
+def tfl_reduce_any(x: torch.Tensor, dim: torch.Tensor, keepdim: bool = False) -> torch.Tensor:
+    if dim.numel() == 0:
+        return torch.any(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
+    result = x
+    for d in sorted(dim_list, reverse=True):
+        result = torch.any(result, dim=d, keepdim=keepdim)
+    return result
 
 
 @tfl_reduce_any.register_fake
-def _(x, dim, keepdim):
-    return torch.any(x, dim=dim[0] if len(dim) == 1 else None, keepdim=keepdim)
+def _(x, dim, keepdim=False):
+    if dim.numel() == 0:
+        return torch.any(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
+    result = x
+    for d in sorted(dim_list, reverse=True):
+        result = torch.any(result, dim=d, keepdim=keepdim)
+    return result
 
 
 # 92: SQUARE
@@ -1501,15 +1566,59 @@ def _(x):
 
 # 102: SPLIT_V
 @torch.library.custom_op("tfl::split_v", mutates_args=())
-def tfl_split_v(x: torch.Tensor, size_splits: list[int], dim: int) -> list[torch.Tensor]:
-    return list(torch.split(x, size_splits, dim=dim))
+def tfl_split_v(x: torch.Tensor, size_splits: torch.Tensor, dim: torch.Tensor) -> list[torch.Tensor]:
+    # Convert size_splits tensor to list of ints
+    if size_splits.dim() == 0:
+        splits_list = [int(size_splits.item())]
+    else:
+        splits_list = [int(s) for s in size_splits.tolist()]
+
+    # Convert dim to int
+    dim_int = int(dim.item()) if isinstance(dim, torch.Tensor) else dim
+
+    # Handle splits - PyTorch split_with_sizes handles zero-size tensors
+    # Filter negative values (TFLite uses -1 for "infer remaining")
+    total_size = x.shape[dim_int]
+    inferred_idx = -1
+    inferred_size = total_size
+
+    for i, s in enumerate(splits_list):
+        if s == -1:
+            inferred_idx = i
+        elif s > 0:
+            inferred_size -= s
+
+    # Replace -1 with inferred size
+    if inferred_idx >= 0:
+        splits_list[inferred_idx] = inferred_size
+
+    # Use split with sizes
+    return [t.clone() for t in torch.split(x, splits_list, dim=dim_int)]
 
 
 @tfl_split_v.register_fake
 def _(x, size_splits, dim):
-    return list(torch.split(x, size_splits, dim=dim))
+    if size_splits.dim() == 0:
+        splits_list = [int(size_splits.item())]
+    else:
+        splits_list = [int(s) for s in size_splits.tolist()]
 
+    dim_int = int(dim.item()) if isinstance(dim, torch.Tensor) else dim
 
+    total_size = x.shape[dim_int]
+    inferred_idx = -1
+    inferred_size = total_size
+
+    for i, s in enumerate(splits_list):
+        if s == -1:
+            inferred_idx = i
+        elif s > 0:
+            inferred_size -= s
+
+    if inferred_idx >= 0:
+        splits_list[inferred_idx] = inferred_size
+
+    return list(torch.split(x, splits_list, dim=dim_int))
 # 103: UNIQUE
 @torch.library.custom_op("tfl::unique", mutates_args=())
 def tfl_unique(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -2071,13 +2180,33 @@ def _(keys):
 
 # 140: REDUCE_ALL
 @torch.library.custom_op("tfl::reduce_all", mutates_args=())
-def tfl_reduce_all(x: torch.Tensor, dim: list[int], keepdim: bool) -> torch.Tensor:
-    return torch.all(x, dim=dim[0] if len(dim) == 1 else None, keepdim=keepdim)
+def tfl_reduce_all(x: torch.Tensor, dim: torch.Tensor, keepdim: bool = False) -> torch.Tensor:
+    if dim.numel() == 0:
+        return torch.all(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
+    result = x
+    for d in sorted(dim_list, reverse=True):
+        result = torch.all(result, dim=d, keepdim=keepdim)
+    return result
 
 
 @tfl_reduce_all.register_fake
-def _(x, dim, keepdim):
-    return torch.all(x, dim=dim[0] if len(dim) == 1 else None, keepdim=keepdim)
+def _(x, dim, keepdim=False):
+    if dim.numel() == 0:
+        return torch.all(x)
+    elif dim.dim() == 0:
+        dim_list = [int(dim.item())]
+    else:
+        dim_list = dim.tolist() if isinstance(dim.tolist(), list) else [int(dim.item())]
+
+    result = x
+    for d in sorted(dim_list, reverse=True):
+        result = torch.all(result, dim=d, keepdim=keepdim)
+    return result
 
 
 # 141: CONV_3D_TRANSPOSE
