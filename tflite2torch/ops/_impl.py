@@ -215,8 +215,9 @@ def tfl_fully_connected(
         keep_num_dims: If true, preserve number of dimensions
         asymmetric_quantize_inputs: For quantized models (not implemented)
     
-    Note: weights_format, keep_num_dims, and asymmetric_quantize_inputs are provided for
-    schema compliance but not all are fully implemented for float models.
+    Note: Per schema.fbs, quantized_bias_type is not exposed as a parameter here as it's
+    handled during model parsing. weights_format, keep_num_dims, and asymmetric_quantize_inputs
+    are provided for schema compliance but not all are fully implemented for float models.
     """
     # Handle keep_num_dims - if true, output should preserve input dimensions
     original_shape = x.shape
@@ -251,6 +252,18 @@ def tfl_fully_connected(
 def _(x, weight, bias, fused_activation_function="NONE", weights_format="DEFAULT", 
       keep_num_dims=False, asymmetric_quantize_inputs=False):
     result = torch.nn.functional.linear(x, weight, bias)
+    
+    # Apply fused activation function (needed for proper shape inference)
+    if fused_activation_function == "RELU":
+        result = torch.nn.functional.relu(result)
+    elif fused_activation_function == "RELU_N1_TO_1":
+        result = torch.clamp(result, min=-1.0, max=1.0)
+    elif fused_activation_function == "RELU6":
+        result = torch.nn.functional.relu6(result)
+    elif fused_activation_function == "TANH":
+        result = torch.tanh(result)
+    elif fused_activation_function == "SIGN_BIT":
+        result = (result >= 0).float()
     
     # Apply shape preservation for fake implementation
     if keep_num_dims and len(x.shape) > 2:
