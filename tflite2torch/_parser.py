@@ -1006,14 +1006,16 @@ class TFLiteParser:
                 if not opts.BoundariesIsNone():
                     options["boundaries"] = [opts.Boundaries(i) for i in range(opts.BoundariesLength())]
                     
-            # For operators without options or not yet implemented, return empty dict
-            # This covers: FLOOR, EXP, LOG, SQRT, RSQRT, SIN, COS, ABS, NEG, SQUARE, ROUND,
-            # RELU, RELU6, TANH, LOGISTIC, ELU, HARD_SWISH, PRELU, EQUAL, NOT_EQUAL, GREATER,
-            # GREATER_EQUAL, LESS, LESS_EQUAL, SELECT, SELECT_V2, ZEROS_LIKE, FILL, TILE,
-            # EXPAND_DIMS, SLICE, PAD, PADV2, BATCH_TO_SPACE_ND, SPACE_TO_BATCH_ND,
-            # GATHER_ND, SCATTER_ND, WHERE, RANK, QUANTIZE, DEQUANTIZE, FLOOR_DIV, FLOOR_MOD,
-            # RANGE, SQUARED_DIFFERENCE, REVERSE_V2, ADD_N, MATRIX_DIAG, MATRIX_SET_DIAG,
-            # SEGMENT_SUM, RFFT2D, BROADCAST_TO, and others
+            # Operators with schemas that are not yet implemented:
+            # ABS, ADD_N, BATCH_TO_SPACE_ND, BROADCAST_TO, COS, DEQUANTIZE, EQUAL, EXP,
+            # EXPAND_DIMS, FILL, FLOOR_DIV, FLOOR_MOD, GATHER_ND, GREATER, GREATER_EQUAL,
+            # HARD_SWISH, LESS, LESS_EQUAL, MATRIX_DIAG, MATRIX_SET_DIAG, NEG, NOT_EQUAL,
+            # PAD, PADV2, QUANTIZE, RANGE, RANK, REVERSE_V2, RFFT2D, SCATTER_ND, SEGMENT_SUM,
+            # SELECT, SELECT_V2, SLICE, SPACE_TO_BATCH_ND, SQUARE, SQUARED_DIFFERENCE, TILE,
+            # WHERE, ZEROS_LIKE
+            
+            # Operators without option schemas (no options defined in schema.fbs):
+            # ELU, FLOOR, LOG, LOGISTIC, PRELU, RELU, RELU6, ROUND, RSQRT, SIN, SQRT, TANH
                 
         except Exception:
             # If parsing fails, return empty options
