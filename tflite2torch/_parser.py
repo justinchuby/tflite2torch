@@ -1015,7 +1015,7 @@ class TFLiteParser:
             # RANGE, SQUARED_DIFFERENCE, REVERSE_V2, ADD_N, MATRIX_DIAG, MATRIX_SET_DIAG,
             # SEGMENT_SUM, RFFT2D, BROADCAST_TO, and others
                 
-        except Exception as e:
+        except Exception:
             # If parsing fails, return empty options
             # This is intentionally lenient to handle schema evolution
             pass

@@ -8,7 +8,6 @@ to their corresponding PyTorch custom operator implementations in tflite2torch.o
 from __future__ import annotations
 
 import inspect
-import re
 import torch
 
 
@@ -334,6 +333,7 @@ class OperatorConverter:
         op_type: str,
         inputs: list[int],
         builtin_options: dict | None = None,
+        options: dict | None = None,  # Backward compatibility alias
     ):
         """
         Convert a TFLite operator to a PyTorch FX graph builder function.
@@ -342,6 +342,7 @@ class OperatorConverter:
             op_type: TFLite operator type (e.g., "CONV_2D", "ADD")
             inputs: List of input tensor indices
             builtin_options: Dictionary of operator options
+            options: Alias for builtin_options (for backward compatibility)
 
         Returns:
             A callable that builds FX graph nodes for this operator
@@ -349,6 +350,10 @@ class OperatorConverter:
         Raises:
             NotImplementedError: If the operator type is not supported
         """
+        # Handle backward compatibility: options is alias for builtin_options
+        if options is not None and builtin_options is None:
+            builtin_options = options
+            
         # Get the tfl ops namespace
         tfl_ops = _get_tfl_ops()
 
