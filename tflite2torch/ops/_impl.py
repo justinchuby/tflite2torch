@@ -5,6 +5,7 @@ in the TFLite BuiltinOperator enum (see plans/tflite_ops.md).
 """
 
 import torch
+from collections.abc import Sequence
 
 
 # 0: ADD
@@ -20,7 +21,7 @@ def _(x, y):
 
 # 1: AVERAGE_POOL_2D
 @torch.library.custom_op("tfl::average_pool_2d", mutates_args=())
-def tfl_average_pool_2d(x: torch.Tensor, kernel_size: list[int], stride: list[int], padding: str) -> torch.Tensor:
+def tfl_average_pool_2d(x: torch.Tensor, kernel_size: Sequence[int], stride: Sequence[int], padding: str) -> torch.Tensor:
     # Simplified - full implementation would handle SAME/VALID padding
     return torch.nn.functional.avg_pool2d(x, kernel_size, stride)
 
@@ -205,7 +206,7 @@ def tfl_fully_connected(
 ) -> torch.Tensor:
     """
     TFLite FULLY_CONNECTED operator implementation.
-    
+
     Args:
         x: Input tensor
         weight: Weight tensor (transposed compared to PyTorch convention)
@@ -214,14 +215,14 @@ def tfl_fully_connected(
         weights_format: Weight format (DEFAULT, SHUFFLED4x16INT8) - only DEFAULT supported
         keep_num_dims: If true, preserve number of dimensions
         asymmetric_quantize_inputs: For quantized models (not implemented)
-    
+
     Note: Per schema.fbs, quantized_bias_type is not exposed as a parameter here as it's
     handled during model parsing. weights_format, keep_num_dims, and asymmetric_quantize_inputs
     are provided for schema compliance but not all are fully implemented for float models.
     """
     # Handle keep_num_dims - if true, output should preserve input dimensions
     original_shape = x.shape
-    
+
     # Apply linear transformation
     result = torch.nn.functional.linear(x, weight, bias)
 
@@ -249,10 +250,10 @@ def tfl_fully_connected(
 
 
 @tfl_fully_connected.register_fake
-def _(x, weight, bias, fused_activation_function="NONE", weights_format="DEFAULT", 
+def _(x, weight, bias, fused_activation_function="NONE", weights_format="DEFAULT",
       keep_num_dims=False, asymmetric_quantize_inputs=False):
     result = torch.nn.functional.linear(x, weight, bias)
-    
+
     # Apply fused activation function (needed for proper shape inference)
     if fused_activation_function == "RELU":
         result = torch.nn.functional.relu(result)
@@ -264,12 +265,12 @@ def _(x, weight, bias, fused_activation_function="NONE", weights_format="DEFAULT
         result = torch.tanh(result)
     elif fused_activation_function == "SIGN_BIT":
         result = (result >= 0).float()
-    
+
     # Apply shape preservation for fake implementation
     if keep_num_dims and len(x.shape) > 2:
         target_shape = list(x.shape[:-1]) + [result.shape[-1]]
         result = result.reshape(target_shape)
-    
+
     return result
 
 
@@ -311,7 +312,7 @@ def _(x, dim):
 
 # 12: L2_POOL_2D
 @torch.library.custom_op("tfl::l2_pool_2d", mutates_args=())
-def tfl_l2_pool_2d(x: torch.Tensor, kernel_size: list[int], stride: list[int]) -> torch.Tensor:
+def tfl_l2_pool_2d(x: torch.Tensor, kernel_size: Sequence[int], stride: Sequence[int]) -> torch.Tensor:
     # Simplified - L2 pooling: sqrt of avg of squares
     return torch.sqrt(torch.nn.functional.avg_pool2d(x * x, kernel_size, stride))
 
@@ -369,7 +370,7 @@ def _(x, hidden, cell, weights):
 
 # 17: MAX_POOL_2D
 @torch.library.custom_op("tfl::max_pool_2d", mutates_args=())
-def tfl_max_pool_2d(x: torch.Tensor, kernel_size: list[int], stride: list[int], padding: str) -> torch.Tensor:
+def tfl_max_pool_2d(x: torch.Tensor, kernel_size: Sequence[int], stride: Sequence[int], padding: str) -> torch.Tensor:
     # Simplified - full implementation would handle SAME/VALID padding
     return torch.nn.functional.max_pool2d(x, kernel_size, stride)
 
@@ -445,7 +446,7 @@ def _(x, shape):
 
 # 23: RESIZE_BILINEAR
 @torch.library.custom_op("tfl::resize_bilinear", mutates_args=())
-def tfl_resize_bilinear(x: torch.Tensor, size: list[int]) -> torch.Tensor:
+def tfl_resize_bilinear(x: torch.Tensor, size: Sequence[int]) -> torch.Tensor:
     return torch.nn.functional.interpolate(x, size=size, mode='bilinear', align_corners=False)
 
 
@@ -674,7 +675,7 @@ def _(params, indices, axis=0, batch_dims=0):
 
 # 37: BATCH_TO_SPACE_ND
 @torch.library.custom_op("tfl::batch_to_space_nd", mutates_args=())
-def tfl_batch_to_space_nd(x: torch.Tensor, block_shape: list[int], crops: list[int]) -> torch.Tensor:
+def tfl_batch_to_space_nd(x: torch.Tensor, block_shape: Sequence[int], crops: Sequence[int]) -> torch.Tensor:
     # Rearranges data from batch into blocks of spatial data
     # This is the inverse of SPACE_TO_BATCH_ND
     # crops is a flattened list: [crop_top, crop_bottom, crop_left, crop_right]
@@ -710,7 +711,7 @@ def _(x, block_shape, crops):
 
 # 38: SPACE_TO_BATCH_ND
 @torch.library.custom_op("tfl::space_to_batch_nd", mutates_args=())
-def tfl_space_to_batch_nd(x: torch.Tensor, block_shape: list[int], paddings: list[int]) -> torch.Tensor:
+def tfl_space_to_batch_nd(x: torch.Tensor, block_shape: Sequence[int], paddings: Sequence[int]) -> torch.Tensor:
     # Rearranges blocks of spatial data into batch
     # paddings is a flattened list: [pad_top, pad_bottom, pad_left, pad_right]
     batch, height, width, channels = x.shape
@@ -745,7 +746,7 @@ def _(x, block_shape, paddings):
 
 # 39: TRANSPOSE
 @torch.library.custom_op("tfl::transpose", mutates_args=())
-def tfl_transpose(x: torch.Tensor, perm: list[int]) -> torch.Tensor:
+def tfl_transpose(x: torch.Tensor, perm: Sequence[int]) -> torch.Tensor:
     return torch.permute(x, perm)
 
 
@@ -801,24 +802,24 @@ def _(x, y):
 
 # 43: SQUEEZE
 @torch.library.custom_op("tfl::squeeze", mutates_args=())
-def tfl_squeeze(x: torch.Tensor, dims: list[int] | None = None) -> torch.Tensor:
-    if dims is None or len(dims) == 0:
+def tfl_squeeze(x: torch.Tensor, squeeze_dims: Sequence[int] = ()) -> torch.Tensor:
+    if not squeeze_dims:
         # Squeeze all dimensions of size 1
         return torch.squeeze(x).clone()
 
     result = x
-    for dim in sorted(dims, reverse=True):
+    for dim in sorted(squeeze_dims, reverse=True):
         result = torch.squeeze(result, dim)
     return result.clone()
 
 
 @tfl_squeeze.register_fake
-def _(x, dims=None):
-    if dims is None or len(dims) == 0:
+def _(x, squeeze_dims=()):
+    if not squeeze_dims:
         return torch.squeeze(x)
 
     result = x
-    for dim in sorted(dims, reverse=True):
+    for dim in sorted(squeeze_dims, reverse=True):
         result = torch.squeeze(result, dim)
     return result
 
@@ -1149,7 +1150,7 @@ def _(x):
 
 # 67: TRANSPOSE_CONV
 @torch.library.custom_op("tfl::transpose_conv", mutates_args=())
-def tfl_transpose_conv(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, output_shape: list[int], stride: list[int]) -> torch.Tensor:
+def tfl_transpose_conv(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, output_shape: Sequence[int], stride: Sequence[int]) -> torch.Tensor:
     # Simplified - would need full transpose convolution implementation
     return torch.nn.functional.conv_transpose2d(x, weight, bias, stride)
 
@@ -1161,7 +1162,7 @@ def _(x, weight, bias, output_shape, stride):
 
 # 68: SPARSE_TO_DENSE
 @torch.library.custom_op("tfl::sparse_to_dense", mutates_args=())
-def tfl_sparse_to_dense(sparse_indices: torch.Tensor, output_shape: list[int], sparse_values: torch.Tensor, default_value: float) -> torch.Tensor:
+def tfl_sparse_to_dense(sparse_indices: torch.Tensor, output_shape: Sequence[int], sparse_values: torch.Tensor, default_value: float) -> torch.Tensor:
     # Convert sparse representation to dense tensor
     output = torch.full(output_shape, default_value, dtype=sparse_values.dtype)
 
@@ -1186,7 +1187,7 @@ def _(sparse_indices, output_shape, sparse_values, default_value):
 
 # 69: TILE
 @torch.library.custom_op("tfl::tile", mutates_args=())
-def tfl_tile(x: torch.Tensor, multiples: list[int]) -> torch.Tensor:
+def tfl_tile(x: torch.Tensor, multiples: Sequence[int]) -> torch.Tensor:
     return x.repeat(multiples)
 
 
@@ -1241,7 +1242,7 @@ def _(x):
 
 # 74: SUM
 @torch.library.custom_op("tfl::sum", mutates_args=())
-def tfl_sum(x: torch.Tensor, dim: list[int], keepdim: bool) -> torch.Tensor:
+def tfl_sum(x: torch.Tensor, dim: Sequence[int], keepdim: bool) -> torch.Tensor:
     return torch.sum(x, dim=dim, keepdim=keepdim)
 
 
@@ -1274,13 +1275,21 @@ def _(x):
 
 # 77: SHAPE
 @torch.library.custom_op("tfl::shape", mutates_args=())
-def tfl_shape(x: torch.Tensor) -> torch.Tensor:
-    return torch.tensor(list(x.shape))
+def tfl_shape(x: torch.Tensor, out_type: int = 2) -> torch.Tensor:
+    # out_type corresponds to TensorType enum: INT32=2, INT64=4
+    # Default to INT32 (2) as per schema
+    shape_tensor = torch.tensor(list(x.shape))
+    if out_type == 4:  # INT64
+        return shape_tensor.to(torch.int64)
+    return shape_tensor.to(torch.int32)
 
 
 @tfl_shape.register_fake
-def _(x):
-    return torch.tensor(list(x.shape))
+def _(x, out_type=2):
+    shape_tensor = torch.tensor(list(x.shape))
+    if out_type == 4:  # INT64
+        return shape_tensor.to(torch.int64)
+    return shape_tensor.to(torch.int32)
 
 
 # 78: POW
@@ -1385,13 +1394,13 @@ def _(x, dim, keepdim=False):
 
 # 83: PACK
 @torch.library.custom_op("tfl::pack", mutates_args=())
-def tfl_pack(tensors: list[torch.Tensor], dim: int) -> torch.Tensor:
-    return torch.stack(tensors, dim=dim)
+def tfl_pack(tensors: list[torch.Tensor], values_count: int = 0, axis: int = 0) -> torch.Tensor:
+    return torch.stack(tensors, dim=axis)
 
 
 @tfl_pack.register_fake
-def _(tensors, dim):
-    return torch.stack(tensors, dim=dim)
+def _(tensors, values_count=0, axis=0):
+    return torch.stack(tensors, dim=axis)
 
 
 # 84: LOGICAL_OR
@@ -1548,7 +1557,7 @@ def _(x):
 
 # 94: FILL
 @torch.library.custom_op("tfl::fill", mutates_args=())
-def tfl_fill(shape: list[int], value: float) -> torch.Tensor:
+def tfl_fill(shape: Sequence[int], value: float) -> torch.Tensor:
     return torch.full(shape, value)
 
 
@@ -1581,7 +1590,7 @@ def _(start, limit, delta):
 
 # 97: RESIZE_NEAREST_NEIGHBOR
 @torch.library.custom_op("tfl::resize_nearest_neighbor", mutates_args=())
-def tfl_resize_nearest_neighbor(x: torch.Tensor, size: list[int]) -> torch.Tensor:
+def tfl_resize_nearest_neighbor(x: torch.Tensor, size: Sequence[int]) -> torch.Tensor:
     return torch.nn.functional.interpolate(x, size=size, mode='nearest')
 
 
@@ -1728,7 +1737,7 @@ def _(x):
 
 # 105: REVERSE_V2
 @torch.library.custom_op("tfl::reverse_v2", mutates_args=())
-def tfl_reverse_v2(x: torch.Tensor, axis: list[int]) -> torch.Tensor:
+def tfl_reverse_v2(x: torch.Tensor, axis: Sequence[int]) -> torch.Tensor:
     result = x
     for ax in axis:
         result = torch.flip(result, dims=[ax])
@@ -2135,7 +2144,7 @@ def _(x):
 
 # 130: BROADCAST_TO
 @torch.library.custom_op("tfl::broadcast_to", mutates_args=())
-def tfl_broadcast_to(x: torch.Tensor, shape: list[int]) -> torch.Tensor:
+def tfl_broadcast_to(x: torch.Tensor, shape: Sequence[int]) -> torch.Tensor:
     return torch.broadcast_to(x, shape)
 
 
@@ -2162,7 +2171,7 @@ def _(x, fft_length):
 
 # 132: CONV_3D
 @torch.library.custom_op("tfl::conv_3d", mutates_args=())
-def tfl_conv_3d(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, stride: list[int], padding: str) -> torch.Tensor:
+def tfl_conv_3d(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, stride: Sequence[int], padding: str) -> torch.Tensor:
     # 3D convolution
     return torch.nn.functional.conv3d(x, weight, bias, stride)
 
@@ -2296,7 +2305,7 @@ def _(x, dim, keepdim=False):
 
 # 141: CONV_3D_TRANSPOSE
 @torch.library.custom_op("tfl::conv_3d_transpose", mutates_args=())
-def tfl_conv_3d_transpose(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, output_shape: list[int], stride: list[int]) -> torch.Tensor:
+def tfl_conv_3d_transpose(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, output_shape: Sequence[int], stride: Sequence[int]) -> torch.Tensor:
     # 3D transpose convolution
     return torch.nn.functional.conv_transpose3d(x, weight, bias, stride)
 
@@ -2308,7 +2317,7 @@ def _(x, weight, bias, output_shape, stride):
 
 # 142: VAR_HANDLE
 @torch.library.custom_op("tfl::var_handle", mutates_args=())
-def tfl_var_handle(shape: list[int], dtype: int) -> torch.Tensor:
+def tfl_var_handle(shape: Sequence[int], dtype: int) -> torch.Tensor:
     # Create a variable handle - return empty tensor of specified shape/dtype
     dtype_map = {0: torch.float32, 2: torch.int32, 4: torch.int64}
     target_dtype = dtype_map.get(dtype, torch.float32)
@@ -2362,7 +2371,7 @@ def _(s0, s1):
 
 # 146: RANDOM_STANDARD_NORMAL
 @torch.library.custom_op("tfl::random_standard_normal", mutates_args=())
-def tfl_random_standard_normal(shape: list[int]) -> torch.Tensor:
+def tfl_random_standard_normal(shape: Sequence[int]) -> torch.Tensor:
     return torch.randn(shape)
 
 
@@ -2373,7 +2382,7 @@ def _(shape):
 
 # 147: BUCKETIZE
 @torch.library.custom_op("tfl::bucketize", mutates_args=())
-def tfl_bucketize(x: torch.Tensor, boundaries: list[float]) -> torch.Tensor:
+def tfl_bucketize(x: torch.Tensor, boundaries: Sequence[float]) -> torch.Tensor:
     return torch.bucketize(x, torch.tensor(boundaries))
 
 
@@ -2384,7 +2393,7 @@ def _(x, boundaries):
 
 # 148: RANDOM_UNIFORM
 @torch.library.custom_op("tfl::random_uniform", mutates_args=())
-def tfl_random_uniform(shape: list[int], minval: float, maxval: float) -> torch.Tensor:
+def tfl_random_uniform(shape: Sequence[int], minval: float, maxval: float) -> torch.Tensor:
     return torch.rand(shape) * (maxval - minval) + minval
 
 
@@ -2417,7 +2426,7 @@ def _(x):
 
 # 151: DYNAMIC_UPDATE_SLICE
 @torch.library.custom_op("tfl::dynamic_update_slice", mutates_args=())
-def tfl_dynamic_update_slice(operand: torch.Tensor, update: torch.Tensor, start_indices: list[int]) -> torch.Tensor:
+def tfl_dynamic_update_slice(operand: torch.Tensor, update: torch.Tensor, start_indices: Sequence[int]) -> torch.Tensor:
     # Updates a slice of operand with update at start_indices
     output = operand.clone()
 
@@ -2589,7 +2598,7 @@ def _(x, y):
 
 # 203: DILATE
 @torch.library.custom_op("tfl::dilate", mutates_args=())
-def tfl_dilate(x: torch.Tensor, dilations: list[int], padding_value: float) -> torch.Tensor:
+def tfl_dilate(x: torch.Tensor, dilations: Sequence[int], padding_value: float) -> torch.Tensor:
     # Dilates a tensor by inserting padding_value between elements
     # dilations: list of dilation factors for each dimension
     output = x

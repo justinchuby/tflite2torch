@@ -211,87 +211,87 @@ class OperatorConverter:
 
     def __init__(self):
         pass
-    
+
     def _transform_options_for_op(self, op_type: str, options: dict) -> dict:
         """
         Transform parsed TFLite options to match custom op parameter names.
-        
+
         Args:
             op_type: TFLite operator type (e.g., "AVERAGE_POOL_2D")
             options: Parsed options from TFLite model
-            
+
         Returns:
             Transformed options dict matching custom op parameters
         """
         if not options:
             return {}
-        
+
         transformed = options.copy()
-        
+
         # Pooling operations: convert filter_width/height and stride_w/h to lists
         if op_type in ["AVERAGE_POOL_2D", "MAX_POOL_2D", "L2_POOL_2D"]:
             if "filter_height" in transformed and "filter_width" in transformed:
                 transformed["kernel_size"] = [transformed.pop("filter_height"), transformed.pop("filter_width")]
             if "stride_h" in transformed and "stride_w" in transformed:
                 transformed["stride"] = [transformed.pop("stride_h"), transformed.pop("stride_w")]
-        
+
         # Conv2D operations: keep stride_h/stride_w separate (custom op expects them individually)
         # No transformation needed for CONV_2D, DEPTHWISE_CONV_2D as custom ops expect stride_h/stride_w
-        
+
         # Conv3D: already transformed in parser to stride list
         if op_type == "CONV_3D" and "stride" in transformed:
             # Parser already provides stride as list [stride_d, stride_h, stride_w]
             pass
-        
+
         # Concatenation: axis -> dim
         if op_type == "CONCATENATION":
             if "axis" in transformed:
                 transformed["dim"] = transformed.pop("axis")
-        
-        # Pack: axis -> dim (but keep as "axis" since custom op expects "axis")
+
+        # Pack: keep axis and values_count as-is (matches TFLite schema)
         # No transformation needed
-        
+
         # Squeeze: squeeze_dims -> dims (but keep as "squeeze_dims" since that's what custom op expects)
         # No transformation needed
-        
+
         # Gather: keep axis and batch_dims as-is
         # No transformation needed
-        
+
         # Remove fused_activation_function if present and operator doesn't support it
         # For now, keep it as many ops do support it
-        
+
         return transformed
-    
+
     def _filter_kwargs_for_function(self, func, kwargs: dict, op_type: str = "") -> dict:
         """
         Filter kwargs to only include parameters that the function accepts.
         Warns when arguments are filtered out.
-        
+
         Args:
             func: The function/op to inspect
             kwargs: Dictionary of keyword arguments to filter
             op_type: Operator type name for logging purposes
-            
+
         Returns:
             Filtered kwargs dict with only accepted parameters
         """
         if not kwargs:
             return {}
-            
+
         try:
             # For torch ops, get the schema
             if hasattr(func, '_schemas'):
                 schemas = func._schemas
                 # Get the default schema (usually '')
                 schema_str = str(schemas.get('', ''))
-                
+
                 # Parse schema to extract parameter names
                 # Format: "namespace::op_name(Type param1, Type param2, ...) -> ReturnType"
                 match = _SCHEMA_PARAM_PATTERN.search(schema_str)
                 if match:
                     params_str = match.group(1)
                     param_names = []
-                    
+
                     # Parse each parameter
                     for param in params_str.split(','):
                         param = param.strip()
@@ -304,10 +304,10 @@ class OperatorConverter:
                                 # Remove any trailing special characters
                                 param_name = param_name.rstrip('?')
                                 param_names.append(param_name)
-                    
+
                     # Filter kwargs to only include accepted parameters
                     filtered = {k: v for k, v in kwargs.items() if k in param_names}
-                    
+
                     # Warn about filtered out arguments
                     filtered_out = set(kwargs.keys()) - set(filtered.keys())
                     if filtered_out:
@@ -317,9 +317,9 @@ class OperatorConverter:
                             f"by the custom op implementation and will be ignored: {sorted(filtered_out)}. "
                             f"Consider updating the custom op to support these arguments."
                         )
-                    
+
                     return filtered
-            
+
             # Fallback: try to inspect as a regular Python function
             if hasattr(func, '__wrapped__'):
                 target_func = func.__wrapped__
@@ -327,23 +327,23 @@ class OperatorConverter:
                 target_func = func.default
             else:
                 target_func = func
-                
+
             sig = inspect.signature(target_func)
             param_names = []
             has_var_keyword = False
-            
+
             for param_name, param in sig.parameters.items():
                 if param.kind == inspect.Parameter.VAR_KEYWORD:
                     has_var_keyword = True
                     break
                 elif param.kind != inspect.Parameter.VAR_POSITIONAL and param_name != 'self':
                     param_names.append(param_name)
-            
+
             if has_var_keyword:
                 return kwargs.copy()
-            
+
             filtered = {k: v for k, v in kwargs.items() if k in param_names}
-            
+
             # Warn about filtered out arguments
             filtered_out = set(kwargs.keys()) - set(filtered.keys())
             if filtered_out:
@@ -353,9 +353,9 @@ class OperatorConverter:
                     f"by the custom op implementation and will be ignored: {sorted(filtered_out)}. "
                     f"Consider updating the custom op to support these arguments."
                 )
-            
+
             return filtered
-            
+
         except Exception:
             # If inspection fails, pass no kwargs to be safe
             return {}
